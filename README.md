@@ -92,7 +92,7 @@ start in seconds. You can also type commands into the console (`add a mug`, `spa
 | **Grip** | Grab the nearest object. If nothing is within reach, force-pull the object you're pointing at |
 | Release grip | Throw. The object leaves with your hand's velocity × `--throw-scale` (default 1.3) |
 | **Trigger** (half) | Show the pointer ray |
-| New asset (C++ app) | It follows the pointer onto the surface you point at (floor, desk). The thumbstick turns it, the **trigger** fixes it there, and **grip** takes it as an ordinary loose prop instead |
+| New asset (C++ app) | A red marker follows the pointer on the surface you point at (floor, desk); its arrow is the asset's facing. The thumbstick turns it, the **trigger** spawns the asset there, fixed. **B** (or "undo") cancels |
 | **Trigger** while holding | Fix the prop where it is, or free a fixed one. Voice: "fix it" / "free it". A fixed prop's main body stays put while its jointed parts (lid, pedal, glasses arms) still move with either hand |
 | **Thumbstick** while holding a fixed prop | Turn it about its centre's vertical axis, so it keeps standing on the floor |
 | **B** | Undo the last spawn |

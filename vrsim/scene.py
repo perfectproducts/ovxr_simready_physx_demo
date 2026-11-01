@@ -121,6 +121,12 @@ def _sphere(radius: float, rings: int = 10, segments: int = 16) -> tuple:
     return points, counts, indices, normals
 
 
+def _offset(mesh: tuple, by) -> tuple:
+    """A _mesh argument tuple (points, ...) with its points moved by `by`."""
+    points, *rest = mesh
+    return ([tuple(float(c) for c in p) for p in np.asarray(points) + np.asarray(by)], *rest)
+
+
 def _material(name: str, color, roughness: float = 0.6, metallic: float = 0.0, emissive=(0, 0, 0)) -> str:
     return f'''        def Material "{name}"
         {{
@@ -721,6 +727,11 @@ def Xform "World"
         {{
 {_mesh("Beam", *ray, "/World/Looks/Ray", indent="            ", cast_shadows=False)}
         }}
+        def Xform "PlaceMarker"
+        {{
+{_mesh("Ball", *_offset(_sphere(0.03), (0, 0, 0.03)), "/World/Looks/Marker", indent="            ", cast_shadows=False)}
+{_mesh("Arrow", *_box((0.1, 0, 0.03), (0.07, 0.008, 0.008)), "/World/Looks/Marker", indent="            ", cast_shadows=False)}
+        }}
     }}
 
 {hud_usda()}
@@ -738,6 +749,7 @@ def Xform "World"
 {_material("HandLeft", (0.1, 0.5, 1.0), roughness=0.3, emissive=(0.02, 0.1, 0.25))}
 {_material("HandRight", (1.0, 0.45, 0.1), roughness=0.3, emissive=(0.25, 0.1, 0.02))}
 {_material("Ray", (0.9, 0.95, 1.0), roughness=0.2, emissive=(0.6, 0.7, 0.9))}
+{_material("Marker", (1.0, 0.05, 0.03), roughness=0.3, emissive=(0.9, 0.04, 0.02))}
 {chr(10).join(_material(name, color, **kw) for name, color, kw in HUD_MATERIALS)}
 {_backdrop_material(config) if fake_sky else ""}
     }}

@@ -52,6 +52,7 @@ const char* kPanel = "/World/HUD/Panel";
 const char* kText = "/World/HUD/Panel/Text";
 const char* kBrowser = "/World/Browser";
 const char* kHighlight = "/World/Browser/Highlight";
+const char* kMarker = "/World/Hands/PlaceMarker";  // red sphere + arrow: where a new asset will stand
 const char* kLoading = "/World/BrowserLoading";  // vrsim.browser loading overlay, in the environment
 const char* kSpinner = "/World/BrowserLoading/Spinner";
 const char* kAccents[3] = { "/World/HUD/Panel/AccentBusy", "/World/HUD/Panel/AccentOk", "/World/HUD/Panel/AccentError" };
@@ -149,11 +150,7 @@ struct Prop
     // Fixed in place: per body, the pose its non-movable bodies are held at (velocity-driven every
     // frame); only the jointed parts still move. Empty = free.
     std::vector<Pose> anchor;
-    // Being placed: it follows the pointer ray (all bodies, parts too) until the trigger fixes it.
-    bool placing = false;
-    Pose spawn;                // the pose it was spawned at (its asset origin, before the correction)
-    std::vector<Pose> rel;     // per body: pose relative to `spawn`, captured once physics has it
-    double bottomZ = 0, spacing = 0.25;  // asset bottom below its origin; gap between batch members
+    bool fixOnSpawn = false;  // placed at the marker: anchor it once physics reports its bodies
     double radius = 0.1, scale = 1.0;
 };
 
@@ -415,7 +412,7 @@ private:
         if ((h[0].primaryReleased || h[1].primaryReleased) && !h[0].primary && !h[1].primary)
             m_link.send({ { "t", "talk" }, { "on", false } });
         if (h[1].secondaryPressed)
-            undo();
+            m_pendingSpawn ? cancelPlacement() : undo();
         if (h[0].secondaryPressed)
             clear();
     }
@@ -503,7 +500,7 @@ private:
             hand.triggerClicked = click && !hand.triggerDown;
             hand.triggerDown = click;
             hand.grip = hi.grip;
-            if (hand.triggerClicked && hand.prop >= 0 && hand.whole && !m_props[hand.prop].placing)
+            if (hand.triggerClicked && hand.prop >= 0 && hand.whole)
                 setFixed(hand.prop, m_props[hand.prop].anchor.empty());
 
             hand.rayLength = 0;
@@ -529,11 +526,6 @@ private:
             return;
         Hand& other = m_hands[1 - h];
         Prop& prop = m_props[ref->prop];
-        if (prop.placing)  // grabbed while being placed: an ordinary loose prop now
-        {
-            prop.placing = false;
-            prop.anchor.clear();
-        }
         const bool fixed = !prop.anchor.empty();
         const bool movable = ref->body < static_cast<int>(prop.movable.size()) && prop.movable[ref->body];
         // A part moves alone while the prop is fixed, or while the other hand holds the rest.
@@ -714,16 +706,13 @@ private:
         return best;
     }
 
-    // Props being placed follow the pointer ray of one hand (the right, or the one whose trigger is
-    // touched alone) onto upward-facing scene surfaces, standing on them; the thumbstick turns
-    // them, the trigger fixes them there. A batch stands in a row across the ray.
+    // A catalog or voice spawn waits for a spot: a red marker follows the pointer ray of one hand
+    // (the right, or the one whose trigger is touched alone) on upward-facing scene surfaces, the
+    // thumbstick turns it (its arrow is the asset's facing), and the trigger spawns the asset
+    // there, fixed. A batch stands in a row across the ray.
     void place(const InputFrame& in)
     {
-        std::vector<int> group;
-        for (size_t i = 0; i < m_props.size(); ++i)
-            if (m_props[i].placing)
-                group.push_back(static_cast<int>(i));
-        if (group.empty())
+        if (!m_pendingSpawn)
             return;
         for (int h = 0; h < 2; ++h)
             if (in.hands[h].trigger > 0.2f && in.hands[1 - h].trigger < 0.05f && m_hands[h].prop < 0)
@@ -738,49 +727,26 @@ private:
         if (hit && hit->second.z > 0.6)
         {
             m_placeAt = hi.aim.p + dir * hit->first;
-            Vec3 side = dir.cross({ 0, 0, 1 });
+            const Vec3 side = dir.cross({ 0, 0, 1 });
             m_placeSide = side.length() > 1e-3 ? side.normalized() : Vec3{ 1, 0, 0 };
             m_placeValid = true;
         }
         if (std::abs(hi.thumbX) > 0.25f)
             m_placeYaw -= hi.thumbX * kTurnRate * m_dt;
-        if (!m_placeValid)
-            return;
-        const int n = static_cast<int>(group.size());
-        for (int k = 0; k < n; ++k)
+        if (hand.triggerClicked && m_placeValid)
         {
-            Prop& prop = m_props[group[k]];
-            if (prop.rel.size() != prop.bodies.size())
-            {
-                std::vector<Pose> rel;
-                for (size_t b = 0; b < prop.bodies.size(); ++b)
-                    if (const BodyState* s = bodyState(group[k], static_cast<int>(b)))
-                        rel.push_back(prop.spawn.inverse() * s->pose);
-                if (rel.size() != prop.bodies.size())
-                    continue;  // not simulated yet
-                prop.rel = std::move(rel);
-            }
-            const Pose base{ m_placeAt + m_placeSide * ((k - (n - 1) / 2.0) * prop.spacing) + Vec3{ 0, 0, -prop.bottomZ + 0.002 },
-                             Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) };
-            prop.anchor.assign(prop.bodies.size(), Pose{});
-            for (size_t b = 0; b < prop.bodies.size(); ++b)
-                prop.anchor[b] = base * prop.rel[b];
-        }
-        if (hand.triggerClicked)
-        {
-            for (int index : group)
-            {
-                Prop& prop = m_props[index];
-                prop.placing = false;
-                if (prop.anchor.empty())  // never simulated: let it drop where it is
-                    continue;
-                const int parts = static_cast<int>(std::count(prop.movable.begin(), prop.movable.end(), true));
-                m_link.send({ { "t", "placed" }, { "name", prop.name }, { "parts", parts }, { "count", n } });
-                m_lastProp = index;
-            }
+            nlohmann::json msg = *m_pendingSpawn;
+            m_pendingSpawn.reset();
+            msg["at_marker"] = true;
+            spawn(msg);
             m_xr->haptic(m_placeHand, 0.8f, 0.08f);
-            m_placeValid = false;
         }
+    }
+
+    void cancelPlacement()
+    {
+        m_pendingSpawn.reset();
+        m_link.send({ { "t", "placing_cancelled" } });
     }
 
     // Thumbstick left/right while holding a fixed prop turns it about its centre's vertical axis,
@@ -794,7 +760,7 @@ private:
             if (hand.prop < 0 || !hand.whole || std::abs(x) < 0.25f)
                 continue;
             Prop& prop = m_props[hand.prop];
-            if (prop.anchor.empty() || prop.placing)
+            if (prop.anchor.empty())
                 continue;
             Vec3 center;
             int n = 0;
@@ -819,18 +785,22 @@ private:
         }
     }
 
-    // Hold the non-movable bodies of fixed props at their anchor poses. Props being placed are
-    // teleported there instead (all bodies), so they never drag through the furniture.
+    // Hold the non-movable bodies of fixed props at their anchor poses.
     void driveAnchors(double horizon)
     {
         for (size_t i = 0; i < m_props.size(); ++i)
         {
-            const Prop& prop = m_props[i];
-            if (prop.placing)
+            Prop& prop = m_props[i];
+            if (prop.fixOnSpawn)  // placed at the marker: fixed where it first appears
             {
-                if (prop.anchor.size() == prop.bodies.size())
-                    m_physics->setBodyPoses(prop.root, prop.bodies, prop.anchor);
-                continue;
+                std::vector<Pose> anchor;
+                for (size_t b = 0; b < prop.bodies.size(); ++b)
+                    if (const BodyState* s = bodyState(static_cast<int>(i), static_cast<int>(b)))
+                        anchor.push_back(s->pose);
+                if (anchor.size() != prop.bodies.size())
+                    continue;
+                prop.anchor = std::move(anchor);
+                prop.fixOnSpawn = false;
             }
             std::vector<ovx_primpath_t> paths;
             std::vector<Vec3> linear, angular;
@@ -944,6 +914,10 @@ private:
             matrices.push_back(hi.aimValid && m_hands[h].rayLength > 0 ? hi.aim.matrix({ 1, 1, m_hands[h].rayLength })
                                                                      : kHidden);
         }
+        prims.push_back(kMarker);
+        matrices.push_back(m_pendingSpawn && m_placeValid
+                               ? Pose{ m_placeAt, Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) }.matrix()
+                               : kHidden);
         hudTransforms(prims, matrices);
         if (m_browser.open)
         {
@@ -1193,10 +1167,7 @@ private:
         return index < m_browser.count ? index : -1;
     }
 
-    bool placingAny() const
-    {
-        return std::any_of(m_props.begin(), m_props.end(), [](const Prop& p) { return p.placing; });
-    }
+    bool placingAny() const { return m_pendingSpawn.has_value(); }
 
     void browserInteract(const InputFrame& in)
     {
@@ -1327,7 +1298,7 @@ private:
             if (t == "spawn")
                 spawn(msg);
             else if (t == "undo")
-                undo();
+                m_pendingSpawn ? cancelPlacement() : undo();
             else if (t == "clear")
                 clear();
             else if (t == "fix")
@@ -1402,28 +1373,30 @@ private:
         // ovphysx skips colliders inside instances (vrsim.assets._asset_overs).
         const std::string assetRef = msg.value("asset_ref", "@" + msg.value("root_usd", "") + "@");
         const double sideSign = m_nextSpawnRight ? 1.0 : -1.0;
-        // Catalog and voice spawns are placed with the pointer; scene props (the mug) stand where they were.
+        // Catalog and voice spawns wait for a spot picked with the marker (place()); scene props
+        // (the mug) stand where they were.
         const bool catalogSpawn = msg.value("position", std::vector<double>{}).empty();
-        const bool placed = catalogSpawn && !m_hulls.empty();
-        if (catalogSpawn)
-            m_nextSpawnRight = !m_nextSpawnRight;
-        if (placed)
+        const bool atMarker = msg.value("at_marker", false);
+        if (catalogSpawn && !atMarker && !m_hulls.empty())
         {
-            for (Prop& p : m_props)  // an unfinished placement drops where it is
-                if (p.placing)
-                    p.placing = false, p.anchor.clear();
-            Vec3 fwd = m_head ? m_head->axis({ 0, 0, -1 }) : Vec3{ 0, 1, 0 };
+            m_pendingSpawn = msg;
+            const Vec3 fwd = m_head ? m_head->axis({ 0, 0, -1 }) : Vec3{ 0, 1, 0 };
             m_placeYaw = std::atan2(fwd.y, fwd.x);
+            m_placeValid = false;
+            m_link.send({ { "t", "placing" }, { "name", msg.value("name", "prop") }, { "count", count } });
+            return;
         }
+        if (catalogSpawn && !atMarker)
+            m_nextSpawnRight = !m_nextSpawnRight;
         const double spacing = std::max(0.25, std::max(size[0], size[1]) * 1.2);
         for (int i = 0; i < count; ++i)
         {
             if (m_props.size() >= kMaxProps)
                 removeProp(0);
             Pose pose = spawnPose(msg, i, count, sideSign);
-            if (placed && m_placeValid)  // straight at the pointer's last target, so it needn't fly there
+            if (atMarker)  // standing on the marked spot, 2 mm up, facing the marker's arrow
                 pose = { m_placeAt + m_placeSide * ((i - (count - 1) / 2.0) * spacing) +
-                             Vec3{ 0, 0, 0.01 - msg.value("bottom_z", 0.0) },
+                             Vec3{ 0, 0, 0.002 - msg.value("bottom_z", 0.0) },
                          Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) };
             const Mat16 m = mul(correction, pose.matrix());
             char rows[512];
@@ -1455,10 +1428,7 @@ private:
             if (prop.spheres.size() != prop.bodies.size())
                 prop.spheres.clear();
             prop.movable = msg.value("body_movable", std::vector<bool>{});
-            prop.placing = placed;
-            prop.spawn = pose;
-            prop.bottomZ = msg.value("bottom_z", 0.0);
-            prop.spacing = spacing;
+            prop.fixOnSpawn = atMarker;
             m_props.push_back(std::move(prop));
         }
         rebuildBodyMap();
@@ -1531,13 +1501,14 @@ private:
     const Clock::time_point m_start = Clock::now();
     int m_nextProp = 0;
     bool m_nextSpawnRight = true;
-    int m_lastProp = -1;
+    int m_lastProp = -1;  // the prop a hand last let go of (target of "fix it")
     std::vector<Hull> m_hulls;
     double m_dt = 1.0 / 72;
+    std::optional<nlohmann::json> m_pendingSpawn;  // a spawn waiting for its spot (place())
     int m_placeHand = 1;
     bool m_placeValid = false;  // m_placeAt is a surface the pointer found
     Vec3 m_placeAt, m_placeSide{ 1, 0, 0 };
-    double m_placeYaw = 0;  // the prop a hand last let go of (target of "fix it")
+    double m_placeYaw = 0;
 };
 
 } // namespace

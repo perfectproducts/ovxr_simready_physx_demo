@@ -7,7 +7,8 @@ one localhost TCP connection carrying JSON lines.
   app -> sidecar   {"t":"talk","on":true|false}          push-to-talk pressed / released
                    {"t":"spawned","name":..,"count":n,"total":k}
                    {"t":"removed","name":..,"total":k}   {"t":"cleared","n":k}
-                   {"t":"fixed"|"unfixed"|"placed","name":..,"parts":n}   {"t":"nothing_to_fix"}
+                   {"t":"fixed"|"unfixed","name":..,"parts":n}   {"t":"nothing_to_fix"}
+                   {"t":"placing","name":..,"count":n}  {"t":"placing_cancelled"}   (spawn waits for a spot)
   sidecar -> app   {"t":"spawn","name":..,"count":n,"root_usd":..,"asset_ref":"@wrapper@</Prop/Asset>","correction":[16],
                     "body_paths":[..],"bottom_z":f,"size":[3],
                     "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..],
@@ -179,19 +180,21 @@ class Sidecar:
         elif kind == "spawned":
             n, total = msg.get("count", 1), msg.get("total", 0)
             title = f"Added {n} × {msg['name']}" if n > 1 else f"Added {msg['name']}"
-            self.feedback.post("ok", title, "point where it should stand · thumbstick turns it · "
-                                            "trigger fixes it there (or grip to just grab it)")
+            self.feedback.post("ok", title, "fixed in place · hold it and use the thumbstick to turn it · "
+                                            "trigger while holding frees it")
         elif kind == "removed":
             self.feedback.post("ok", f"Removed {msg['name']}", f"{msg.get('total', 0)} objects in the scene")
         elif kind == "cleared":
             n = msg.get("n", 0)
             self.feedback.post("ok" if n else "info", f"Cleared {n} object{'s' if n != 1 else ''}" if n
                                else "Nothing to clear")
-        elif kind == "placed":
-            parts = msg.get("parts", 0)
-            self.feedback.post("ok", f"Placed {msg['name']}",
-                               (f"its {parts} jointed part{'s' if parts != 1 else ''} still move · " if parts else "")
-                               + "hold it and use the thumbstick to turn it · trigger while holding frees it")
+        elif kind == "placing":
+            n = msg.get("count", 1)
+            self.feedback.post("info", f"Where should {'they' if n > 1 else 'it'} stand?",
+                               f"point the red marker at a spot for {msg['name']} · thumbstick turns it · "
+                               "trigger places it · B cancels", hold=30.0)
+        elif kind == "placing_cancelled":
+            self.feedback.post("info", "Placement cancelled")
         elif kind == "fixed":
             parts = msg.get("parts", 0)
             self.feedback.post("ok", f"Fixed {msg['name']} in place",
