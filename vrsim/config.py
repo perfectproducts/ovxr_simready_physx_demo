@@ -70,6 +70,27 @@ def _environment_usd() -> Path | None:
 
 
 @dataclass
+class Decal:
+    """A textured patch (PNG, alpha cut out) on the authored scene, in its coordinates (before
+    ``EnvironmentConfig.offset``). Flat, or wrapped around a vertical cylinder of ``radius`` whose
+    axis passes through ``center``."""
+
+    image: Path
+    center: tuple[float, float, float]
+    size: tuple[float, float]  # width (arc length when wrapped), height [m]
+    facing: float = -90.0  # direction the patch faces [deg from +X toward +Y]; -90 faces the user
+    radius: float = 0.0
+
+
+def _studierstube_decals() -> tuple[Decal, ...]:
+    """OpenUSD logo beside the "OpenUSD" text on the laptop screen; NVIDIA logo around the mug,
+    turned toward the standing spot. Sources: assets/logos/SOURCES.txt."""
+    logos = PROJECT_ROOT / "assets" / "logos"
+    return (Decal(logos / "openusd.png", (0.19, 0.4625, 1.075), (0.12, 0.12)),
+            Decal(logos / "nvidia_white_text.png", (0.43, 0.41, 0.9), (0.09, 0.072), facing=-113.0, radius=0.0555))
+
+
+@dataclass
 class EnvironmentConfig:
     """An authored scene (Z-up, metres) replacing the generated floor and table.
 
@@ -88,6 +109,11 @@ class EnvironmentConfig:
     # Top-level prims (fnmatch patterns) that cast no shadow in Minimal rendering: it has a single
     # sun and no fill light, so the pergola's shadow on the desk renders almost black.
     shadowless_prims: tuple[str, ...] = ("Pavilion_post*", "Side_lintel*", "Cross_lintel*", "Pergola_rafter*")
+    decals: tuple[Decal, ...] = field(default_factory=_studierstube_decals)
+    # Meshes (paths below the scene's root) given a plain material of this linear colour: the mug
+    # and its handle (Torus) go black so the NVIDIA logo reads on it.
+    prim_colors: dict[str, tuple[float, float, float]] = field(
+        default_factory=lambda: {"Ceramic_mug/Cylinder_004": (0.012, 0.012, 0.013), "Torus/Torus": (0.012, 0.012, 0.013)})
 
 
 def _sky_hdri() -> Path | None:

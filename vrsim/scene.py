@@ -178,6 +178,12 @@ def _authored_environment(config: Config, physics: bool, fake_sky: bool = False)
     for name in env.hidden_prims:
         if root.GetChild(name):
             overs[(name,)] = "active = false"
+    bindings: dict[tuple[str, ...], str] = {}
+    for i, rel_path in enumerate(env.prim_colors):
+        if stage.GetPrimAtPath(root.GetPath().AppendPath(rel_path)):
+            key = tuple(rel_path.split("/"))
+            bindings[key] = f"{DECALS_PATH}/Looks/Color{i}"
+            overs.setdefault(key, "")
     if physics:
         for prim in Usd.PrimRange(root):
             if not prim.IsA(UsdGeom.Mesh):
@@ -201,6 +207,8 @@ def _authored_environment(config: Config, physics: bool, fake_sky: bool = False)
                 lines.append(f'{pad}    uniform token physics:approximation = "convexHull"')
             if key in shadowless:
                 lines.append(f"{pad}    bool primvars:doNotCastShadows = 1")
+            if key in bindings:
+                lines.append(f"{pad}    rel material:binding = <{bindings[key]}>")
             if meta != "active = false":
                 lines += tree(key, depth + 1)
             lines.append(f"{pad}}}")
@@ -214,7 +222,114 @@ def _authored_environment(config: Config, physics: bool, fake_sky: bool = False)
         double3 xformOp:translate = ({ox}, {oy}, {oz})
         uniform token[] xformOpOrder = ["xformOp:translate"]
 {chr(10).join(tree((), 2))}
+{_decals(env)}
     }}'''
+
+
+DECALS_PATH = "/World/Environment/Decals"
+
+
+def _decal_mesh(name: str, decal, material: str, indent: str) -> str:
+    """A grid in the scene's coordinates with st texture coordinates (v up)."""
+    w, h = decal.size
+    a = math.radians(decal.facing)
+    facing, right = np.array([math.cos(a), math.sin(a), 0.0]), np.array([-math.sin(a), math.cos(a), 0.0])
+    center, up = np.array(decal.center, dtype=float), np.array([0.0, 0.0, 1.0])
+    cols = 24 if decal.radius > 0 else 1
+    points, normals, st = [], [], []
+    for v in (0.0, 1.0):
+        for i in range(cols + 1):
+            u = i / cols
+            if decal.radius > 0:
+                phi = a + (u - 0.5) * w / decal.radius  # u grows to the viewer's right
+                n = np.array([math.cos(phi), math.sin(phi), 0.0])
+                p = center + n * decal.radius
+            else:
+                n, p = facing, center + right * (u - 0.5) * w
+            points.append(tuple(float(c) for c in p + up * (v - 0.5) * h))
+            normals.append(tuple(float(c) for c in n))
+            st.append((u, v))
+    indices = [j for i in range(cols) for j in (i, i + 1, cols + 2 + i, cols + 1 + i)]
+    return "\n".join([
+        f'{indent}def Mesh "{name}"',
+        f"{indent}{{",
+        f"{indent}    int[] faceVertexCounts = [{_fmt([4] * cols)}]",
+        f"{indent}    int[] faceVertexIndices = [{_fmt(indices)}]",
+        f"{indent}    point3f[] points = [{_fmt(points)}]",
+        f'{indent}    normal3f[] normals = [{_fmt(normals)}] (interpolation = "vertex")',
+        f'{indent}    texCoord2f[] primvars:st = [{_fmt(st)}] (interpolation = "vertex")',
+        f'{indent}    uniform token subdivisionScheme = "none"',
+        f"{indent}    bool primvars:doNotCastShadows = 1",
+        f"{indent}    rel material:binding = <{material}>",
+        f"{indent}}}",
+    ])
+
+
+def _logo_material(name: str, image: Path) -> str:
+    look = f"{DECALS_PATH}/Looks/{name}"
+    return f"""                def Material "{name}"
+                {{
+                    token outputs:surface.connect = <{look}/Shader.outputs:surface>
+                    def Shader "Shader"
+                    {{
+                        uniform token info:id = "UsdPreviewSurface"
+                        color3f inputs:diffuseColor.connect = <{look}/Image.outputs:rgb>
+                        float inputs:opacity.connect = <{look}/Image.outputs:a>
+                        float inputs:opacityThreshold = 0.5
+                        float inputs:roughness = 0.35
+                        token outputs:surface
+                    }}
+                    def Shader "Image"
+                    {{
+                        uniform token info:id = "UsdUVTexture"
+                        asset inputs:file = @{Path(image).resolve().as_posix()}@
+                        token inputs:sourceColorSpace = "sRGB"
+                        token inputs:wrapS = "clamp"
+                        token inputs:wrapT = "clamp"
+                        float2 inputs:st.connect = <{look}/Reader.outputs:result>
+                        float3 outputs:rgb
+                        float outputs:a
+                    }}
+                    def Shader "Reader"
+                    {{
+                        uniform token info:id = "UsdPrimvarReader_float2"
+                        string inputs:varname = "st"
+                        float2 outputs:result
+                    }}
+                }}"""
+
+
+def _color_material(name: str, color) -> str:
+    look = f"{DECALS_PATH}/Looks/{name}"
+    return f"""                def Material "{name}"
+                {{
+                    token outputs:surface.connect = <{look}/Shader.outputs:surface>
+                    def Shader "Shader"
+                    {{
+                        uniform token info:id = "UsdPreviewSurface"
+                        color3f inputs:diffuseColor = ({_fmt(color)})
+                        float inputs:roughness = 0.3
+                        token outputs:surface
+                    }}
+                }}"""
+
+
+def _decals(env) -> str:
+    """Logo decals and the plain materials of ``prim_colors``, under the Environment prim so they
+    share the scene's coordinates."""
+    decals = [d for d in env.decals if Path(d.image).exists()]
+    meshes = [_decal_mesh(f"Decal{i}", d, f"{DECALS_PATH}/Looks/Logo{i}", "            ") for i, d in enumerate(decals)]
+    looks = [_logo_material(f"Logo{i}", d.image) for i, d in enumerate(decals)]
+    looks += [_color_material(f"Color{i}", color) for i, color in enumerate(env.prim_colors.values())]
+    nl = "\n"
+    return f"""        def Xform "Decals"
+        {{
+{nl.join(meshes)}
+            def Scope "Looks"
+            {{
+{nl.join(looks)}
+            }}
+        }}"""
 
 
 def _toward(elevation: float, azimuth: float) -> str:

@@ -1,0 +1,4 @@
+openusd.png             rasterized from https://openusd.org/images/USDLogoUnsized.svg
+nvidia_white_text.png   rasterized from https://commons.wikimedia.org/wiki/File:Nvidia_Logo.svg,
+                        wordmark recolored white for the dark mug
+Trademarks of their owners; used here only to decorate the demo scene.
