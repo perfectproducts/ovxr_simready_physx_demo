@@ -7,11 +7,12 @@ one localhost TCP connection carrying JSON lines.
   app -> sidecar   {"t":"talk","on":true|false}          push-to-talk pressed / released
                    {"t":"spawned","name":..,"count":n,"total":k}
                    {"t":"removed","name":..,"total":k}   {"t":"cleared","n":k}
+                   {"t":"fixed"|"unfixed","name":..,"parts":n}   {"t":"nothing_to_fix"}
   sidecar -> app   {"t":"spawn","name":..,"count":n,"root_usd":..,"asset_ref":"@wrapper@</Prop/Asset>","correction":[16],
                     "body_paths":[..],"bottom_z":f,"size":[3],
                     "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..],
                     "position":[x,y,z] (optional: place the asset origin there, unrotated)}
-                   {"t":"undo"}  {"t":"clear"}
+                   {"t":"undo"}  {"t":"clear"}  {"t":"fix","on":true|false}  (a held / last touched prop)
                    {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
 
     uv run python -m vrsim.sidecar           (then start cpp\\build\\vrsim_cpp.exe)
@@ -185,6 +186,15 @@ class Sidecar:
             n = msg.get("n", 0)
             self.feedback.post("ok" if n else "info", f"Cleared {n} object{'s' if n != 1 else ''}" if n
                                else "Nothing to clear")
+        elif kind == "fixed":
+            parts = msg.get("parts", 0)
+            self.feedback.post("ok", f"Fixed {msg['name']} in place",
+                               (f"grab its {parts} jointed part{'s' if parts != 1 else ''} to move them · "
+                                if parts else "") + "trigger while holding it to free it")
+        elif kind == "unfixed":
+            self.feedback.post("ok", f"Freed {msg['name']}", "grip to grab, release to throw")
+        elif kind == "nothing_to_fix":
+            self.feedback.post("info", "Nothing to fix", "Say “add a mug” to spawn something")
         elif kind == "nothing_to_undo":
             self.feedback.post("info", "Nothing to undo", "Say “add a mug” to spawn something")
         elif kind == "browser_pick":
@@ -220,6 +230,8 @@ class Sidecar:
                     self._cancel_downloads(command.text != "✕")
                 elif command.kind in ("undo", "clear"):
                     self.link.send({"t": command.kind})
+                elif command.kind in ("fix", "unfix"):
+                    self.link.send({"t": "fix", "on": command.kind == "fix"})
                 elif command.kind == "browser_page" and self.browser_entries:
                     self._request_page(self._page_index + command.count)
                 elif command.kind == "browser_close":

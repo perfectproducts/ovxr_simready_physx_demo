@@ -16,6 +16,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <csignal>
@@ -144,6 +145,9 @@ struct Prop
     std::vector<std::string> bodyPaths;
     std::vector<std::array<double, 4>> spheres;  // per body: center in the body frame, radius [m]
     std::vector<bool> movable;  // per body: a jointed part (lid, temple) the second hand may take
+    // Fixed in place: per body, the pose its non-movable bodies are held at (velocity-driven every
+    // frame); only the jointed parts still move. Empty = free.
+    std::vector<Pose> anchor;
     double radius = 0.1, scale = 1.0;
 };
 
@@ -162,7 +166,7 @@ struct Hand
     // touched one). Only then can the other hand take a movable part, which it holds alone.
     bool whole = true;
     std::vector<Pose> rel;
-    bool pulling = false, squeezing = false;
+    bool pulling = false, squeezing = false, triggerDown = false;
     std::deque<std::pair<double, Vec3>> history;  // (time, grip position)
     double rayLength = 0;
     Vec3 lastAngular;
@@ -475,6 +479,12 @@ private:
             else if (was && !hand.squeezing && hand.prop >= 0)
                 release(h);
 
+            // Trigger while holding a prop whole: fix it where it is, or free a fixed one.
+            const bool click = hi.trigger > (hand.triggerDown ? 0.3f : 0.7f);
+            if (click && !hand.triggerDown && hand.prop >= 0 && hand.whole)
+                setFixed(hand.prop, m_props[hand.prop].anchor.empty());
+            hand.triggerDown = click;
+
             hand.rayLength = 0;
             if (hand.prop < 0 && hi.aimValid && hi.trigger > 0.1f)
             {
@@ -498,9 +508,11 @@ private:
             return;
         Hand& other = m_hands[1 - h];
         const Prop& prop = m_props[ref->prop];
-        const bool part = other.prop == ref->prop && other.whole && other.body != ref->body &&
-                          ref->body < static_cast<int>(prop.movable.size()) && prop.movable[ref->body];
-        if (other.prop == ref->prop && !part)  // anything else on a held prop: take it over
+        const bool fixed = !prop.anchor.empty();
+        const bool movable = ref->body < static_cast<int>(prop.movable.size()) && prop.movable[ref->body];
+        // A part moves alone while the prop is fixed, or while the other hand holds the rest.
+        const bool part = movable && (fixed || (other.prop == ref->prop && other.whole && other.body != ref->body));
+        if (other.prop == ref->prop && (other.body == ref->body || (!part && !fixed)))  // take it over
             other.prop = other.body = -1;
         hand.prop = ref->prop;
         hand.body = ref->body;
@@ -527,7 +539,11 @@ private:
     {
         Hand& hand = m_hands[h];
         Hand& other = m_hands[1 - h];
-        if (hand.prop >= 0 && other.prop == hand.prop)
+        if (hand.prop >= 0 && !m_props[hand.prop].anchor.empty())
+        {
+            // Fixed: the anchor keeps holding it; a released part swings on as it was moving.
+        }
+        else if (hand.prop >= 0 && other.prop == hand.prop)
         {
             // Letting go of a part: the holding hand keeps it at its new angle. Letting go of the
             // whole: the part's hand now holds everything. Either way, no throw.
@@ -536,9 +552,72 @@ private:
         }
         else if (!hand.pulling && hand.prop >= 0)
             throwProp(hand);
+        m_lastProp = hand.prop;
         hand.prop = hand.body = -1;
         hand.pulling = false;
         m_xr->haptic(h, 0.3f, 0.02f);
+    }
+
+    // Fix a prop where it is now (its non-movable bodies stay put, its jointed parts still move),
+    // or free it: a hand holding it whole then carries all of it again.
+    void setFixed(int index, bool fixed)
+    {
+        Prop& prop = m_props[index];
+        prop.anchor.clear();
+        if (fixed)
+            for (size_t b = 0; b < prop.bodies.size(); ++b)
+            {
+                const BodyState* s = bodyState(index, static_cast<int>(b));
+                prop.anchor.push_back(s ? s->pose : Pose{});
+            }
+        for (int h = 0; h < 2; ++h)
+            if (m_hands[h].prop == index)
+            {
+                m_hands[h].pulling = false;
+                if (m_hands[h].whole)
+                    captureWhole(m_hands[h]);
+                m_xr->haptic(h, fixed ? 0.8f : 0.5f, fixed ? 0.08f : 0.04f);
+            }
+        const int parts = static_cast<int>(std::count(prop.movable.begin(), prop.movable.end(), true));
+        m_link.send({ { "t", fixed ? "fixed" : "unfixed" }, { "name", prop.name }, { "parts", parts } });
+    }
+
+    // Voice "fix it" / "free it": a held prop, else the one last let go of, else the newest.
+    void fixCommand(bool fixed)
+    {
+        int index = -1;
+        for (const Hand& hand : m_hands)
+            if (hand.prop >= 0 && (index < 0 || hand.whole))
+                index = hand.prop;
+        if (index < 0)
+            index = m_lastProp >= 0 && m_lastProp < static_cast<int>(m_props.size()) ? m_lastProp
+                                                                                    : static_cast<int>(m_props.size()) - 1;
+        if (index < 0)
+            m_link.send({ { "t", "nothing_to_fix" } });
+        else
+            setFixed(index, fixed);
+    }
+
+    // Hold the non-movable bodies of fixed props at their anchor poses.
+    void driveAnchors(double horizon)
+    {
+        for (size_t i = 0; i < m_props.size(); ++i)
+        {
+            const Prop& prop = m_props[i];
+            std::vector<ovx_primpath_t> paths;
+            std::vector<Vec3> linear, angular;
+            for (size_t b = 0; b < prop.anchor.size(); ++b)
+            {
+                const BodyState* s = b < prop.movable.size() && prop.movable[b] ? nullptr : bodyState(static_cast<int>(i), static_cast<int>(b));
+                if (!s)
+                    continue;
+                const Pose& t = prop.anchor[b];
+                paths.push_back(s->path);
+                linear.push_back(clampLength((t.p - s->pose.p) * (1.0 / horizon), kMaxLinear));
+                angular.push_back(clampLength((t.q * s->pose.q.conj()).rotationVector() * (1.0 / horizon), kMaxAngular));
+            }
+            m_physics->setBodyVelocities(prop.root, paths, linear, angular);
+        }
     }
 
     // The hand's velocity, carried rigidly: each body gets v + w x (its offset from the touched body).
@@ -565,11 +644,14 @@ private:
     // physical, pulled props fly to the hand, and the last velocity becomes the throw.
     void driveGrabs(const InputFrame& in, double horizon)
     {
+        driveAnchors(horizon);
         for (int h = 0; h < 2; ++h)
         {
             Hand& hand = m_hands[h];
             if (hand.prop < 0 || !in.hands[h].active)
                 continue;
+            if (hand.whole && !m_props[hand.prop].anchor.empty())
+                continue;  // holding a fixed prop: the anchor drives it
             if (!bodyState(hand.prop, hand.body))
             {
                 hand.prop = hand.body = -1;
@@ -1012,6 +1094,8 @@ private:
                 undo();
             else if (t == "clear")
                 clear();
+            else if (t == "fix")
+                fixCommand(msg.value("on", true));
             else if (t == "browser")
                 showBrowser(msg);
             else if (t == "browser_close")
@@ -1131,6 +1215,7 @@ private:
     {
         for (Hand& h : m_hands)
             h.prop = h.body = -1;
+        m_lastProp = -1;
         const Prop prop = m_props[index];
         const ovstage_ordinal_t ordinal = m_stage->current();
         m_stage->removeReference(prop.handle, ordinal);
@@ -1189,6 +1274,7 @@ private:
     const Clock::time_point m_start = Clock::now();
     int m_nextProp = 0;
     bool m_nextSpawnRight = true;
+    int m_lastProp = -1;  // the prop a hand last let go of (target of "fix it")
 };
 
 } // namespace
