@@ -9,7 +9,7 @@ one localhost TCP connection carrying JSON lines.
                    {"t":"removed","name":..,"total":k}   {"t":"cleared","n":k}
   sidecar -> app   {"t":"spawn","name":..,"count":n,"root_usd":..,"asset_ref":"@wrapper@</Prop/Asset>","correction":[16],
                     "body_paths":[..],"bottom_z":f,"size":[3],
-                    "body_spheres":[[cx,cy,cz,r],..]}
+                    "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..]}
                    {"t":"undo"}  {"t":"clear"}
                    {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
 

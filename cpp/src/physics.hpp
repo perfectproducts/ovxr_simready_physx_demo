@@ -10,6 +10,7 @@
 
 #include <ovphysx/ovphysx.h>
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -41,15 +42,19 @@ public:
 
     // Overwrite the velocities of every body under `propRoot` (COM linear [m/s], angular [rad/s]).
     void setVelocity(const std::string& propRoot, const Vec3& linear, const Vec3& angular);
-    // Same for one rigid-body prim, e.g. the part of a jointed asset a hand holds.
-    void setBodyVelocity(const std::string& bodyPath, const Vec3& linear, const Vec3& angular);
+    // Per-body velocities for some bodies of one prop, in one write: a hand moving a jointed asset
+    // rigidly, or one part of it. `linear`/`angular` are in `bodies` order.
+    void setBodyVelocities(const std::string& propRoot, const std::vector<ovx_primpath_t>& bodies,
+                           const std::vector<Vec3>& linear, const std::vector<Vec3>& angular);
     void forgetProp(const std::string& propRoot);
 
 private:
     void wait(ovphysx_enqueue_result_t task, const char* what);
-    // Rigid bodies matching a selection pattern, cached until the next sync.
-    ovphysx_query_handle_t selectionQuery(const std::string& pattern);
-    void writeVelocity(ovphysx_query_handle_t query, const Vec3& linear, const Vec3& angular);
+    // Rigid bodies matching a selection, cached until the next sync under `key` (prefixed by the
+    // prop root, so forgetProp finds it).
+    ovphysx_query_handle_t selectionQuery(const std::string& key, const ovphysx_query_selection_t& selection);
+    // `velocity(path, attribute)`: attribute 0 linear, 1 angular.
+    void writeVelocity(ovphysx_query_handle_t query, const std::function<Vec3(ovx_primpath_t, size_t)>& velocity);
 
     Stage& m_stage;
     ovphysx_instance_handle_t m_px = OVPHYSX_INVALID_HANDLE;

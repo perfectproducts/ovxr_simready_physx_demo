@@ -142,10 +142,11 @@ struct Prop
     std::vector<ovx_primpath_t> bodies;
     std::vector<std::string> bodyPaths;
     std::vector<std::array<double, 4>> spheres;  // per body: center in the body frame, radius [m]
+    std::vector<bool> movable;  // per body: a jointed part (lid, temple) the second hand may take
     double radius = 0.1, scale = 1.0;
 };
 
-// One rigid body of a prop. Jointed assets have several, and each hand holds the one it touched.
+// One rigid body of a prop. Jointed assets have several.
 struct BodyRef
 {
     int prop = -1, body = -1;
@@ -154,8 +155,12 @@ struct BodyRef
 struct Hand
 {
     int prop = -1;  // index into props, -1 = empty
-    int body = -1;  // index into that prop's bodies
-    Pose offset;    // body pose in the grip frame
+    int body = -1;  // index into that prop's bodies: the one this hand touched
+    Pose offset;    // that body's pose in the grip frame
+    // The first hand on a prop holds all of it rigidly (rel: every body's pose relative to the
+    // touched one). Only then can the other hand take a movable part, which it holds alone.
+    bool whole = true;
+    std::vector<Pose> rel;
     bool pulling = false, squeezing = false;
     std::deque<std::pair<double, Vec3>> history;  // (time, grip position)
     double rayLength = 0;
@@ -489,27 +494,69 @@ private:
         const BodyState* body = ref ? bodyState(ref->prop, ref->body) : nullptr;
         if (!body)
             return;
-        // The other hand may keep holding another part of the same prop (a lid, a temple): each
-        // hand drives only its own body and the asset's joints connect them. The same body moves
-        // to the new hand.
         Hand& other = m_hands[1 - h];
-        if (other.prop == ref->prop && other.body == ref->body)
+        const Prop& prop = m_props[ref->prop];
+        const bool part = other.prop == ref->prop && other.whole && other.body != ref->body &&
+                          ref->body < static_cast<int>(prop.movable.size()) && prop.movable[ref->body];
+        if (other.prop == ref->prop && !part)  // anything else on a held prop: take it over
             other.prop = other.body = -1;
         hand.prop = ref->prop;
         hand.body = ref->body;
+        hand.whole = !part;
+        hand.pulling = hand.pulling && !part;
         hand.offset = hi.grip.inverse() * body->pose;
+        if (hand.whole)
+            captureWhole(hand);
         m_xr->haptic(h, 0.6f, 0.04f);
+    }
+
+    // Record every body's pose relative to the touched one, so the hand carries them rigidly.
+    void captureWhole(Hand& hand)
+    {
+        const Prop& prop = m_props[hand.prop];
+        const BodyState* touched = bodyState(hand.prop, hand.body);
+        hand.rel.assign(prop.bodies.size(), Pose{});
+        for (size_t b = 0; touched && b < prop.bodies.size(); ++b)
+            if (const BodyState* s = bodyState(hand.prop, static_cast<int>(b)))
+                hand.rel[b] = touched->pose.inverse() * s->pose;
     }
 
     void release(int h)
     {
         Hand& hand = m_hands[h];
-        const bool otherHolds = m_hands[1 - h].prop == hand.prop;  // letting go of one part: no throw
-        if (!hand.pulling && !otherHolds && hand.prop >= 0)
-            m_physics->setVelocity(m_props[hand.prop].root, hand.velocity() * kThrowScale, hand.lastAngular);
+        Hand& other = m_hands[1 - h];
+        if (hand.prop >= 0 && other.prop == hand.prop)
+        {
+            // Letting go of a part: the holding hand keeps it at its new angle. Letting go of the
+            // whole: the part's hand now holds everything. Either way, no throw.
+            other.whole = true;
+            captureWhole(other);
+        }
+        else if (!hand.pulling && hand.prop >= 0)
+            throwProp(hand);
         hand.prop = hand.body = -1;
         hand.pulling = false;
         m_xr->haptic(h, 0.3f, 0.02f);
+    }
+
+    // The hand's velocity, carried rigidly: each body gets v + w x (its offset from the touched body).
+    void throwProp(const Hand& hand)
+    {
+        const Prop& prop = m_props[hand.prop];
+        const BodyState* touched = bodyState(hand.prop, hand.body);
+        if (!touched)
+            return;
+        const Vec3 v = hand.velocity() * kThrowScale, w = hand.lastAngular;
+        std::vector<ovx_primpath_t> paths;
+        std::vector<Vec3> linear, angular;
+        for (size_t b = 0; b < prop.bodies.size(); ++b)
+            if (const BodyState* s = bodyState(hand.prop, static_cast<int>(b)))
+            {
+                paths.push_back(s->path);
+                linear.push_back(v + w.cross(s->pose.p - touched->pose.p));
+                angular.push_back(w);
+            }
+        m_physics->setBodyVelocities(prop.root, paths, linear, angular);
     }
 
     // Velocity that reaches the hand target by the end of this frame's physics; contacts stay
@@ -521,8 +568,7 @@ private:
             Hand& hand = m_hands[h];
             if (hand.prop < 0 || !in.hands[h].active)
                 continue;
-            const BodyState* body = bodyState(hand.prop, hand.body);
-            if (!body)
+            if (!bodyState(hand.prop, hand.body))
             {
                 hand.prop = hand.body = -1;
                 continue;
@@ -532,11 +578,26 @@ private:
                 hand.offset.p = hand.offset.p * 0.85;
                 hand.pulling = hand.offset.p.length() > 0.03;
             }
+            const Prop& prop = m_props[hand.prop];
+            const Hand& other = m_hands[1 - h];
+            const int partOfOther = other.prop == hand.prop && !other.whole ? other.body : -1;
             const Pose target = in.hands[h].grip * hand.offset;
-            const Vec3 v = clampLength((target.p - body->pose.p) * (1.0 / horizon), kMaxLinear);
-            const Vec3 w = clampLength((target.q * body->pose.q.conj()).rotationVector() * (1.0 / horizon), kMaxAngular);
-            hand.lastAngular = w;
-            m_physics->setBodyVelocity(m_props[hand.prop].bodyPaths[hand.body], v, w);
+            std::vector<ovx_primpath_t> paths;
+            std::vector<Vec3> linear, angular;
+            for (size_t b = 0; b < prop.bodies.size(); ++b)
+            {
+                const bool mine = hand.whole ? static_cast<int>(b) != partOfOther : static_cast<int>(b) == hand.body;
+                const BodyState* s = mine ? bodyState(hand.prop, static_cast<int>(b)) : nullptr;
+                if (!s)
+                    continue;
+                const Pose t = hand.whole && b < hand.rel.size() ? target * hand.rel[b] : target;
+                paths.push_back(s->path);
+                linear.push_back(clampLength((t.p - s->pose.p) * (1.0 / horizon), kMaxLinear));
+                angular.push_back(clampLength((t.q * s->pose.q.conj()).rotationVector() * (1.0 / horizon), kMaxAngular));
+                if (static_cast<int>(b) == hand.body)
+                    hand.lastAngular = angular.back();
+            }
+            m_physics->setBodyVelocities(prop.root, paths, linear, angular);
         }
     }
 
@@ -1030,6 +1091,7 @@ private:
                     prop.spheres.push_back({ sphere[0], sphere[1], sphere[2], sphere[3] });
             if (prop.spheres.size() != prop.bodies.size())
                 prop.spheres.clear();
+            prop.movable = msg.value("body_movable", std::vector<bool>{});
             m_props.push_back(std::move(prop));
         }
         rebuildBodyMap();

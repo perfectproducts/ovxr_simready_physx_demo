@@ -134,9 +134,11 @@ class AssetInfo:
     body_paths: list[str]  # rigid-body prims relative to the wrapper root, e.g. "Asset/bodies/body_000"
     bottom_z: float
     size: list[float]
-    # Per body, its bounding sphere in the body frame [m]: cx, cy, cz, r. Hands pick the nearest
-    # body, so each part of a jointed asset (a lid, a temple) can be held on its own.
+    # Per body, its bounding sphere in the body frame [m]: cx, cy, cz, r. Hands pick the nearest body.
     body_spheres: list[list[float]]
+    # Per body, whether it is a movable part: body1 of a non-fixed joint (a lid, a temple). While one
+    # hand holds the asset, the other hand can grab such a part and move it against the joint.
+    body_movable: list[bool]
 
 
 def describe_asset(root_usd: Path, out_dir: Path) -> AssetInfo:
@@ -161,12 +163,23 @@ def describe_asset(root_usd: Path, out_dir: Path) -> AssetInfo:
             continue
         lo, hi = np.array(local.GetMin()) * scale, np.array(local.GetMax()) * scale
         spheres.append([*((lo + hi) * 0.5).tolist(), max(float(np.linalg.norm(hi - lo) * 0.5), 0.02)])
+    # Joint targets may name a mesh under the body: resolve to the nearest rigid-body ancestor.
+    index = {p.GetPath(): i for i, p in enumerate(prims)}
+    movable = [False] * len(prims)
+    for joint in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()):
+        if not joint.IsA(UsdPhysics.Joint) or joint.IsA(UsdPhysics.FixedJoint):
+            continue
+        for target in UsdPhysics.Joint(joint).GetBody1Rel().GetTargets():
+            while not target.isEmpty and target not in index:
+                target = target.GetParentPath()
+            if target in index:
+                movable[index[target]] = True
     world = bbox_cache.ComputeWorldBound(stage.GetPrimAtPath(WRAPPER_ROOT)).ComputeAlignedRange()
     bottom, size = (0.0, [0.2] * 3) if world.IsEmpty() else (float(world.GetMin()[2]), list(world.GetSize()))
     m = _correction_matrix(Usd.Stage.Open(str(root_usd), load=Usd.Stage.LoadNone))
     correction = [float(m[r][c]) for r in range(4) for c in range(4)]
     asset_ref = f"@{wrapper.as_posix()}@<{WRAPPER_ROOT}/Asset>"
-    return AssetInfo(root_usd, asset_ref, correction, bodies, bottom, [float(s) for s in size], spheres)
+    return AssetInfo(root_usd, asset_ref, correction, bodies, bottom, [float(s) for s in size], spheres, movable)
 
 
 def prepare_asset(entry: CatalogEntry, root_usd: Path, out_dir: Path) -> PreparedAsset:

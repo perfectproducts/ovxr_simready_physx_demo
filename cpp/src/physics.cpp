@@ -155,30 +155,46 @@ void Physics::readBodies()
     }
 }
 
-ovphysx_query_handle_t Physics::selectionQuery(const std::string& pattern)
+ovphysx_query_handle_t Physics::selectionQuery(const std::string& key, const ovphysx_query_selection_t& selection)
 {
-    auto it = m_selectionQueries.find(pattern);
+    auto it = m_selectionQueries.find(key);
     if (it != m_selectionQueries.end())
         return it->second;
-    ovphysx_query_selection_t selection{};
-    selection.pattern = { pattern.c_str(), pattern.size() };
     ovphysx_query_handle_t query = 0;
     wait(ovphysx_query_selection(m_px, OVPHYSX_QUERY_TARGET_RIGID_BODY, &selection, &query, nullptr),
          "ovphysx_query_selection");
-    return m_selectionQueries.emplace(pattern, query).first->second;
+    return m_selectionQueries.emplace(key, query).first->second;
 }
 
 void Physics::setVelocity(const std::string& propRoot, const Vec3& linear, const Vec3& angular)
 {
-    writeVelocity(selectionQuery(propRoot + "/**"), linear, angular);
+    const std::string pattern = propRoot + "/**";
+    ovphysx_query_selection_t selection{};
+    selection.pattern = { pattern.c_str(), pattern.size() };
+    writeVelocity(selectionQuery(pattern, selection), [&](ovx_primpath_t, size_t a) { return a == 0 ? linear : angular; });
 }
 
-void Physics::setBodyVelocity(const std::string& bodyPath, const Vec3& linear, const Vec3& angular)
+void Physics::setBodyVelocities(const std::string& propRoot, const std::vector<ovx_primpath_t>& bodies,
+                                const std::vector<Vec3>& linear, const std::vector<Vec3>& angular)
 {
-    writeVelocity(selectionQuery(bodyPath), linear, angular);
+    if (bodies.empty())
+        return;
+    std::string key = propRoot + "/#";
+    for (ovx_primpath_t b : bodies)
+        key += std::to_string(b) + ",";
+    ovphysx_query_selection_t selection{};
+    selection.prim_paths = bodies.data();
+    selection.prim_paths_count = static_cast<uint32_t>(bodies.size());
+    std::unordered_map<ovx_primpath_t, size_t> row;
+    for (size_t i = 0; i < bodies.size(); ++i)
+        row[bodies[i]] = i;
+    writeVelocity(selectionQuery(key, selection), [&](ovx_primpath_t path, size_t a) {
+        const auto it = row.find(path);
+        return it == row.end() ? Vec3{} : (a == 0 ? linear : angular)[it->second];
+    });
 }
 
-void Physics::writeVelocity(ovphysx_query_handle_t query, const Vec3& linear, const Vec3& angular)
+void Physics::writeVelocity(ovphysx_query_handle_t query, const std::function<Vec3(ovx_primpath_t, size_t)>& velocity)
 {
     const ovx_string_or_token_t attrs[] = { name(OVPHYSX_ATTR_LINEAR_VELOCITY), name(OVPHYSX_ATTR_ANGULAR_VELOCITY) };
     ovphysx_write_handle_t write = 0;
@@ -189,15 +205,15 @@ void Physics::writeVelocity(ovphysx_query_handle_t query, const Vec3& linear, co
         wait(ovphysx_fetch_write_next(m_px, write, &fg), "ovphysx_fetch_write_next");
         if (!fg.group)
             break;
-        const Vec3& v = fg.attribute_index == 0 ? linear : angular;
-        const DLTensor& t = fg.group->data.tensors[0];
-        float* out = static_cast<float*>(t.data);
-        const int64_t rows = t.ndim > 0 ? t.shape[0] : 1;
-        for (int64_t i = 0; i < rows; ++i)
+        const std::vector<ovx_primpath_t> rows = groupPaths(m_stage.paths(), fg.group->prims);
+        float* out = static_cast<float*>(fg.group->data.tensors[0].data);
+        for (size_t i = 0; i < rows.size(); ++i)
         {
-            out[i * 3] = static_cast<float>(v.x);
-            out[i * 3 + 1] = static_cast<float>(v.y);
-            out[i * 3 + 2] = static_cast<float>(v.z);
+            const uint32_t r = fg.group->data.index_map ? fg.group->data.index_map[i] : static_cast<uint32_t>(i);
+            const Vec3 v = velocity(rows[i], fg.attribute_index);
+            out[r * 3] = static_cast<float>(v.x);
+            out[r * 3 + 1] = static_cast<float>(v.y);
+            out[r * 3 + 2] = static_cast<float>(v.z);
         }
         wait(ovphysx_commit_group(m_px, write, fg.group, ovstage_cuda_sync_t{}), "ovphysx_commit_group");
     }
