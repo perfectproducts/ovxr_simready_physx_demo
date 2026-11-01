@@ -187,6 +187,7 @@ struct Browser
     Pose pose;
     bool placed = false;
     int hover = -1;        // tile index under a pointer
+    int reportedHover = -1;  // last hover sent to the sidecar (it shows that asset's details)
     int hoverWidget = 0;   // 1 = close button, 2 = move handle
     int movingHand = -1;   // hand dragging the panel by its handle
     Pose moveOffset;       // panel pose in that hand's aim frame
@@ -935,6 +936,11 @@ private:
                 m_xr->haptic(h, 0.5f, 0.04f);
             }
         }
+        if (m_browser.hover != m_browser.reportedHover)
+        {
+            m_browser.reportedHover = m_browser.hover;
+            m_link.send({ { "t", "browser_hover" }, { "index", m_browser.hover } });
+        }
         for (int h = 0; h < 2; ++h)  // a thumbstick flick pages
         {
             const float x = in.hands[h].thumbX;
@@ -978,7 +984,7 @@ private:
         m_stage->commit();
         placeBrowser(msg);  // no-op once placed (it stays put while paging, or where it was dragged)
         m_browser.open = true;
-        m_browser.hover = -1;
+        m_browser.hover = m_browser.reportedHover = -1;  // a new page: report the next hover again
         logf("Browser page %d/%d (%d assets)", msg.value("page", 0) + 1, msg.value("pages", 1), m_browser.count);
     }
 

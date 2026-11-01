@@ -27,6 +27,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
@@ -120,6 +121,8 @@ class Sidecar:
         # single worker where the newest request wins.
         self._spawn_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="spawn")
         self._page_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="browser")
+        self._info_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="info")
+        self._hover_request = 0
         self._page_lock = threading.Lock()
         self._page_request = 0
         self._page_index = 0
@@ -186,6 +189,12 @@ class Sidecar:
             self.feedback.post("info", "Nothing to undo", "Say “add a mug” to spawn something")
         elif kind == "browser_pick":
             self.commands.put(Command("browser_pick", count=int(msg.get("index", -1))))
+        elif kind == "browser_hover":
+            self._hover_request += 1
+            index = int(msg.get("index", -1))
+            if self.page and 0 <= index < len(self.page.entries):
+                self._info_pool.submit(self._safely, self._show_entry_info, self._hover_request,
+                                       self.page.entries[index])
         elif kind == "browser_page":
             self.commands.put(Command("browser_page", count=int(msg.get("delta", 1))))
         elif kind == "browser_closed":  # closed from the panel's ✕ button
@@ -295,6 +304,25 @@ class Sidecar:
         return payload
 
     # --- asset browser -------------------------------------------------------------------------
+    def _show_entry_info(self, request: int, entry) -> None:
+        """Size and download size of the catalog tile under the pointer, on the info panel. Waits a
+        moment so sweeping across tiles doesn't flicker, and stays quiet while downloading."""
+        time.sleep(0.25)
+        if request != self._hover_request or self._downloads:
+            return
+        dims = self.catalog.dimensions_of(entry)
+        if dims is None and entry.key in self._infos:
+            dims = self._infos[entry.key].size
+        parts = [_format_dimensions(dims) if dims else "dimensions known after download"]
+        size = self.catalog.package_size(entry)
+        if size:
+            parts.append(f"{_format_bytes(size[0])} download ({size[1]} files)")
+        if self.catalog.is_downloaded(entry):
+            parts.append("already downloaded")
+        parts.append(entry.repo_id)
+        if request == self._hover_request and not self._downloads:
+            self.feedback.post("info", entry.name, " · ".join(parts), hold=6.0)
+
     def _request_page(self, index: int) -> None:
         pages = max(1, -(-len(self.browser_entries) // PAGE_SIZE))
         with self._page_lock:
@@ -333,6 +361,20 @@ class Sidecar:
             closest = ", ".join(e.name for e, _ in self.catalog.search(query, 3))
             self.feedback.post("error", f"No SimReady assets for '{query}'",
                                f"Closest: {closest}" if closest else "")
+
+
+def _format_dimensions(dims) -> str:
+    """'12.1 × 8.1 × 9.7 cm' (metres from 1 m up)."""
+    if max(dims) >= 1.0:
+        return " × ".join(f"{d:.2f}" for d in dims) + " m"
+    return " × ".join(f"{d * 100:.1f}" for d in dims) + " cm"
+
+
+def _format_bytes(n: int) -> str:
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= scale:
+            return f"{n / scale:.1f} {unit}"
+    return f"{n} B"
 
 
 def main() -> None:

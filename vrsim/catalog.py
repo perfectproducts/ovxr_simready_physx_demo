@@ -32,7 +32,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import HfApi, hf_hub_download, try_to_load_from_cache
 from rapidfuzz import fuzz, process
 
 from .config import Config
@@ -84,6 +84,7 @@ class CatalogEntry:
     root_usd: str  # repo-relative path of the entry USD
     tags: list[str] = field(default_factory=list)
     revision: str | None = None  # commit to download from (SimReady Central pins one); None = main
+    dimensions: list[float] | None = None  # bounding box x, y, z [m], as SimReady Central reports it
 
     @property
     def key(self) -> str:
@@ -147,6 +148,8 @@ class SimReadyCatalog:
         self.index_path = config.cache_dir / "catalog_index.json"
         self._by_package: dict[tuple[str, str], CatalogEntry] = {}
         self._central_cache: dict[tuple[str, int], list[CatalogEntry]] = {}
+        self._sizes: dict[str, tuple[int, int] | None] = {}
+        self._no_dimensions: set[str] = set()
 
     # --- index ---------------------------------------------------------------------------------
     def load(self, refresh: bool = False) -> "SimReadyCatalog":
@@ -274,7 +277,8 @@ class SimReadyCatalog:
         body = {"hybrid_text_query": query, "file_extension_include": "usd*", "limit": limit,
                 "vector_queries": [{"field_name": "siglip2-embedding.embedding", "query_type": "text",
                                     "query": query}],
-                "return_vision_generated_metadata": True, "deduplicate_by_hash": True}
+                "return_vision_generated_metadata": True, "return_usd_dimensions": True,
+                "deduplicate_by_hash": True}
         request = urllib.request.Request(f"{url}/search_hybrid", json.dumps(body).encode(),
                                          {"Content-Type": "application/json"})
         try:
@@ -304,8 +308,13 @@ class SimReadyCatalog:
             return None
         repo, revision, usd = m.groups()
         package_dir = usd.split("/simready_usd/")[0]
+        dims = source.get("usd_dimensions") or {}
+        mpu = dims.get("scene_mpu") or 1.0
+        dimensions = ([float(dims[f"scaled_bbox_dimension_{a}"]) * mpu for a in "xyz"]
+                      if all(f"scaled_bbox_dimension_{a}" in dims for a in "xyz") else None)
         known = self._by_package.get((repo, package_dir))
         if known:
+            known.dimensions = known.dimensions or dimensions
             return known
         vlm = {x.get("name"): x.get("value_text") or []
                for x in source.get("plugin_thumbnail_to_vision_metadata_metadata_vlm_generated", [])}
@@ -314,7 +323,8 @@ class SimReadyCatalog:
             name = (vlm.get("object_type") or [name])[0].lower()
         caption = (vlm.get("caption") or [""])[0].lower()
         return CatalogEntry(name=name, repo_id=repo, package_dir=package_dir, root_usd=usd,
-                            tags=[repo.split("/")[0].lower(), *caption.split()[:12]], revision=revision)
+                            tags=[repo.split("/")[0].lower(), *caption.split()[:12]], revision=revision,
+                            dimensions=dimensions)
 
     # --- search / fetch ------------------------------------------------------------------------
     def search(self, query: str, limit: int = 5) -> list[tuple[CatalogEntry, float]]:
@@ -386,6 +396,43 @@ class SimReadyCatalog:
                 return entry, self.config.min_match_score
         return None
 
+    def _package_files(self, entry: CatalogEntry) -> list:
+        """The files a download fetches (no thumbnails or metadata), from the Hub listing."""
+        return [f for f in self.api.list_repo_tree(entry.repo_id, path_in_repo=entry.package_dir,
+                                                   recursive=True, repo_type="dataset",
+                                                   revision=entry.revision)
+                if hasattr(f, "size") and "/.thumbs/" not in f.path and "/.metadata/" not in f.path]
+
+    def package_size(self, entry: CatalogEntry) -> tuple[int, int] | None:
+        """(bytes, files) a download would fetch, or None if the Hub can't be listed. Cached."""
+        if entry.key not in self._sizes:
+            try:
+                files = self._package_files(entry) if entry.package_dir else []
+                self._sizes[entry.key] = (sum(f.size for f in files), len(files)) if files else None
+            except Exception as exc:
+                log.debug("No size for %s: %s", entry.name, exc)
+                return None
+        return self._sizes[entry.key]
+
+    def dimensions_of(self, entry: CatalogEntry) -> list[float] | None:
+        """Bounding box x, y, z [m]: from SimReady Central (searching the asset's own name if no
+        earlier search reported it), else measured from the root USD if it is downloaded."""
+        if entry.dimensions is None and entry.key not in self._no_dimensions:
+            for hit in self.central_search(entry.name, 40) or []:
+                if hit.key == entry.key and hit is not entry:
+                    entry.dimensions = hit.dimensions
+            if entry.dimensions is None and self.is_downloaded(entry):
+                entry.dimensions = _measure_usd(hf_hub_download(entry.repo_id, entry.root_usd, repo_type="dataset",
+                                                                revision=entry.revision))
+            if entry.dimensions is None:
+                self._no_dimensions.add(entry.key)
+        return entry.dimensions
+
+    def is_downloaded(self, entry: CatalogEntry) -> bool:
+        """Whether the root USD is already in the local Hugging Face cache."""
+        return isinstance(try_to_load_from_cache(entry.repo_id, entry.root_usd, repo_type="dataset",
+                                                 revision=entry.revision), str)
+
     def fetch(self, entry: CatalogEntry, progress: Callable[[int, int, int, int], None] | None = None,
               cancel: threading.Event | None = None) -> Path:
         """Download one package (USD + payloads + textures) and return the local root USD path.
@@ -400,10 +447,7 @@ class SimReadyCatalog:
         if not entry.package_dir:
             return Path(hf_hub_download(entry.repo_id, entry.root_usd, repo_type="dataset",
                                         revision=entry.revision))
-        files = [f for f in self.api.list_repo_tree(entry.repo_id, path_in_repo=entry.package_dir,
-                                                    recursive=True, repo_type="dataset",
-                                                    revision=entry.revision)
-                 if hasattr(f, "size") and "/.thumbs/" not in f.path and "/.metadata/" not in f.path]
+        files = self._package_files(entry)
         total = sum(f.size for f in files)
         state = {"bytes": 0, "files": 0}
         lock = threading.Lock()
@@ -435,6 +479,26 @@ class SimReadyCatalog:
         if not path.exists():
             raise FileNotFoundError(f"{entry.root_usd} missing after download from {entry.repo_id}")
         return path
+
+
+def _measure_usd(path: str) -> list[float] | None:
+    """Bounding box of a USD's default prim in metres, as x, y, z with Z up."""
+    try:
+        from pxr import Usd, UsdGeom
+
+        stage = Usd.Stage.Open(path)
+        prim = stage.GetDefaultPrim()
+        if not prim:
+            return None
+        box = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render]) \
+            .ComputeWorldBound(prim).ComputeAlignedRange()
+        if box.IsEmpty():
+            return None
+        size = [float(v) * UsdGeom.GetStageMetersPerUnit(stage) for v in box.GetSize()]
+        return [size[0], size[2], size[1]] if UsdGeom.GetStageUpAxis(stage) == UsdGeom.Tokens.y else size
+    except Exception as exc:
+        log.debug("Could not measure %s: %s", path, exc)
+        return None
 
 
 def _flatten(obj, prefix: str = "") -> dict:
