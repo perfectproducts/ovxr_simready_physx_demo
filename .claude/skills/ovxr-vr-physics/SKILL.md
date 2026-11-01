@@ -81,6 +81,13 @@ ovxr 0.1, ovphysx 0.7, Newton/Warp current, Meta Horizon Link runtime.
 - **Grab = velocity drive, not teleport.** Compute the target once per frame over the frame
   horizon (velocity = (target − current) / frame_dt) and set linear and angular velocity before
   stepping. Driving per substep or from stale poses jitters. Throw = hand velocity × scale on release.
+- **Jointed assets: grab per body.** Each hand picks the nearest body (sidecar sends
+  `body_spheres`) and drives only that body's velocity (`Physics::setBodyVelocity`, an ovphysx
+  selection on the exact body path), so one hand can hold the frame while the other swings a
+  hinged part. Releasing one part while the other hand still holds the prop doesn't throw.
+  Joints in nvidia/simready-assets are mostly standalone PxJoints (eyeglasses, waste bin, blue box,
+  ratchet). Articulated ones (compressor) aren't covered: RIGID_BODY queries skip articulation links.
+  Python ovphysx: `write_sync` prefetches its groups into `session.groups` (`fetch_next` then returns None).
 - Step on a fixed 1/72 s with substeps (144 Hz scene) and use wall-clock dt only for UI animation.
 
 ## 5. Voice and catalog
