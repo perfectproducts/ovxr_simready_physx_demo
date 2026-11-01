@@ -1027,6 +1027,9 @@ private:
 
     Pose spawnPose(const nlohmann::json& msg, int i, int count) const
     {
+        // A scene object made grabbable (sidecar desk_props): exactly where it stood, 2 mm up.
+        if (const auto at = msg.value("position", std::vector<double>{}); at.size() == 3)
+            return { { at[0], at[1], at[2] + 0.002 + i * 0.2 } };
         const auto size = msg.value("size", std::vector<double>{ 0.2, 0.2, 0.2 });
         const double extent = std::max({ size[0], size[1], size[2] });
         Vec3 fwd{ 0, 1, 0 }, base{ 0, 0.7, 0 };

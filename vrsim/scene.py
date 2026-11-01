@@ -175,7 +175,7 @@ def _authored_environment(config: Config, physics: bool, fake_sky: bool = False)
                         rel = tuple(prim.GetPath().MakeRelativePath(root.GetPath()).pathString.split("/"))
                         shadowless.add(rel)
                         overs.setdefault(rel, "")
-    for name in env.hidden_prims:
+    for name in (*env.hidden_prims, *(p for prims in env.desk_props.values() for p in prims)):
         if root.GetChild(name):
             overs[(name,)] = "active = false"
     bindings: dict[tuple[str, ...], str] = {}
@@ -265,8 +265,8 @@ def _decal_mesh(name: str, decal, material: str, indent: str) -> str:
     ])
 
 
-def _logo_material(name: str, image: Path) -> str:
-    look = f"{DECALS_PATH}/Looks/{name}"
+def _logo_material(name: str, image: Path, looks: str = f"{DECALS_PATH}/Looks") -> str:
+    look = f"{looks}/{name}"
     return f"""                def Material "{name}"
                 {{
                     token outputs:surface.connect = <{look}/Shader.outputs:surface>
@@ -299,8 +299,8 @@ def _logo_material(name: str, image: Path) -> str:
                 }}"""
 
 
-def _color_material(name: str, color) -> str:
-    look = f"{DECALS_PATH}/Looks/{name}"
+def _color_material(name: str, color, looks: str = f"{DECALS_PATH}/Looks") -> str:
+    look = f"{looks}/{name}"
     return f"""                def Material "{name}"
                 {{
                     token outputs:surface.connect = <{look}/Shader.outputs:surface>
@@ -317,7 +317,8 @@ def _color_material(name: str, color) -> str:
 def _decals(env) -> str:
     """Logo decals and the plain materials of ``prim_colors``, under the Environment prim so they
     share the scene's coordinates."""
-    decals = [d for d in env.decals if Path(d.image).exists()]
+    on_props = {id(d) for decals in desk_prop_decals(env).values() for d in decals}
+    decals = [d for d in env.decals if Path(d.image).exists() and id(d) not in on_props]
     meshes = [_decal_mesh(f"Decal{i}", d, f"{DECALS_PATH}/Looks/Logo{i}", "            ") for i, d in enumerate(decals)]
     looks = [_logo_material(f"Logo{i}", d.image) for i, d in enumerate(decals)]
     looks += [_color_material(f"Color{i}", color) for i, color in enumerate(env.prim_colors.values())]
@@ -331,6 +332,115 @@ def _decals(env) -> str:
             }}
         }}"""
 
+
+
+def _desk_prop_bounds(env) -> dict[str, tuple]:
+    """World bounds (scene coordinates) of each desk prop's prims: (min, max) as numpy arrays."""
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.Open(str(env.usd))
+    root = stage.GetDefaultPrim()
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    bounds = {}
+    for name, prims in env.desk_props.items():
+        lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+        for prim_name in prims:
+            prim = root.GetChild(prim_name)
+            if prim:
+                r = cache.ComputeWorldBound(prim).ComputeAlignedRange()
+                lo, hi = np.minimum(lo, np.array(r.GetMin())), np.maximum(hi, np.array(r.GetMax()))
+        if np.all(np.isfinite(lo)):
+            bounds[name] = (lo, hi)
+    return bounds
+
+
+def desk_prop_decals(env) -> dict[str, list]:
+    """The decals that sit on each desk prop (their center within 1 cm of its bounds)."""
+    if env.usd is None or not env.desk_props:
+        return {}
+    out = {}
+    for name, (lo, hi) in _desk_prop_bounds(env).items():
+        out[name] = [d for d in env.decals if Path(d.image).exists()
+                     and np.all(np.array(d.center) >= lo - 0.01) and np.all(np.array(d.center) <= hi + 0.01)]
+    return out
+
+
+def write_desk_prop(config: Config, name: str, out_dir: Path) -> tuple[Path, tuple[float, float, float]] | None:
+    """A grabbable copy of a scene object: one rigid body (convex-hull colliders on its meshes)
+    referencing the object's prims from the scene file, with ``prim_colors`` and its decals applied.
+    The origin is the bottom center. Returns the USD and where that origin stands in the world."""
+    from pxr import Usd, UsdGeom
+
+    env = config.environment
+    bounds = _desk_prop_bounds(env).get(name)
+    if bounds is None:
+        return None
+    lo, hi = bounds
+    origin = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+    stage = Usd.Stage.Open(str(env.usd))
+    root = stage.GetDefaultPrim()
+    scene_file = Path(env.usd).resolve().as_posix()
+    looks = "/Prop/Looks"
+    colors = {k: (f"{looks}/Color{i}", c) for i, (k, c) in enumerate(env.prim_colors.items())}
+    parts = []
+    for i, prim_name in enumerate(env.desk_props[name]):
+        prim = root.GetChild(prim_name)
+        if not prim:
+            continue
+        overs = []
+        for mesh in Usd.PrimRange(prim):
+            if not mesh.IsA(UsdGeom.Mesh) or mesh == prim:
+                continue
+            rel = mesh.GetPath().MakeRelativePath(prim.GetPath()).pathString
+            size = UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"]).ComputeLocalBound(mesh) \
+                .ComputeAlignedRange().GetSize()
+            solid = min(size) >= 0.003  # flat decals (the coffee surface) get no collider
+            schemas = '"PhysicsCollisionAPI", "PhysicsMeshCollisionAPI", ' if solid else ""
+            body = ['                uniform token physics:approximation = "convexHull"'] if solid else []
+            color = colors.get(f"{prim_name}/{rel}")
+            if color:
+                body.append(f"                rel material:binding = <{color[0]}>")
+            overs.append(f'''            over "{rel}" (prepend apiSchemas = [{schemas}"MaterialBindingAPI"])
+            {{
+{chr(10).join(body)}
+            }}''')
+        parts.append(f'''        def "Part{i}" (prepend references = @{scene_file}@<{prim.GetPath()}>)
+        {{
+{chr(10).join(overs)}
+        }}''')
+    decals = desk_prop_decals(env).get(name, [])
+    meshes = [_decal_mesh(f"Decal{i}", d, f"{looks}/Logo{i}", "        ") for i, d in enumerate(decals)]
+    materials = [_logo_material(f"Logo{i}", d.image, looks) for i, d in enumerate(decals)]
+    materials += [_color_material(path.rsplit("/", 1)[1], c, looks) for path, c in colors.values()]
+    nl = "\n"
+    text = f'''#usda 1.0
+(
+    defaultPrim = "Prop"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Prop" (prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"])
+{{
+    float physics:mass = {env.desk_prop_mass}
+    def Xform "Geometry"
+    {{
+        double3 xformOp:translate = ({_fmt([float(-c) for c in origin])})
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+{nl.join(parts)}
+{nl.join(meshes)}
+    }}
+    def Scope "Looks"
+    {{
+{nl.join(materials)}
+    }}
+}}
+'''
+    path = out_dir / f"desk_prop_{name.lower().replace(' ', '_')}.usda"
+    path.write_text(text, encoding="utf-8")
+    world = origin + np.array(env.offset)
+    return path, (float(world[0]), float(world[1]), float(world[2]))
 
 def _toward(elevation: float, azimuth: float) -> str:
     """matrix4d whose +Z points toward (elevation, azimuth) [deg]: a DistantLight shines along -Z."""

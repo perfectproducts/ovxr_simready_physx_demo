@@ -9,7 +9,8 @@ one localhost TCP connection carrying JSON lines.
                    {"t":"removed","name":..,"total":k}   {"t":"cleared","n":k}
   sidecar -> app   {"t":"spawn","name":..,"count":n,"root_usd":..,"asset_ref":"@wrapper@</Prop/Asset>","correction":[16],
                     "body_paths":[..],"bottom_z":f,"size":[3],
-                    "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..]}
+                    "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..],
+                    "position":[x,y,z] (optional: place the asset origin there, unrotated)}
                    {"t":"undo"}  {"t":"clear"}
                    {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
 
@@ -36,7 +37,7 @@ from .browser import PAGE_SIZE, BrowserBuilder, Page
 from .catalog import DownloadCancelled, SimReadyCatalog
 from .config import Config
 from .hud import Feedback, TextLayout, download_progress
-from .scene import write_environment
+from .scene import write_desk_prop, write_environment
 from .voice import Command, VoiceListener, start_console
 
 log = logging.getLogger("vrsim.sidecar")
@@ -103,6 +104,15 @@ class Sidecar:
         minimal = write_environment(config, config.generated_dir / "environment_physics_minimal.usda", physics=True,
                                     loading_layer=self.browser.loading_layer(), fake_sky=True)
         log.info("Environment for the C++ app: %s (Minimal rendering: %s)", self.env_path, minimal.name)
+        # Scene objects made grabbable (the NVIDIA mug): spawned where they stood on every connect.
+        self.desk_props = []
+        self._quiet_spawns = 0
+        if config.environment.usd is not None:
+            for name in config.environment.desk_props:
+                built = write_desk_prop(config, name, config.generated_dir)
+                if built:
+                    path, position = built
+                    self.desk_props.append((name, describe_asset(path, config.generated_dir), position))
         self._infos = {}
         self._downloads: dict[str, threading.Event] = {}  # entry.key -> cancel flag, while downloading
         self._downloads_lock = threading.Lock()
@@ -127,6 +137,10 @@ class Sidecar:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             log.info("App connected from %s:%d", *addr)
             self.link.attach(sock)
+            self._quiet_spawns = len(self.desk_props)  # keep the connect hint on the panel
+            for name, info, position in self.desk_props:
+                self.link.send({"t": "spawn", "name": name, "count": 1, **self._spawn_payload(info),
+                                "position": list(position)})
             self.feedback.post("info", "Hold A or X and speak",
                                "“add a mug” · “what balls are available?” · “undo” · “clear all”", hold=12.0)
             try:
@@ -155,6 +169,8 @@ class Sidecar:
         kind = msg.get("t")
         if kind == "talk":
             (self.voice.start if msg.get("on") else self.voice.stop)()
+        elif kind == "spawned" and self._quiet_spawns > 0:
+            self._quiet_spawns -= 1
         elif kind == "spawned":
             n, total = msg.get("count", 1), msg.get("total", 0)
             title = f"Added {n} × {msg['name']}" if n > 1 else f"Added {msg['name']}"
@@ -270,9 +286,13 @@ class Sidecar:
         if not self.link.connected.is_set():
             self.feedback.post("error", "The VR app is not connected", "Start cpp\\build\\vrsim_cpp.exe")
             return
+        self.link.send({"t": "spawn", "name": entry.name, "count": count, **self._spawn_payload(info)})
+
+    @staticmethod
+    def _spawn_payload(info) -> dict:
         payload = asdict(info)
         payload["root_usd"] = info.root_usd.as_posix()
-        self.link.send({"t": "spawn", "name": entry.name, "count": count, **payload})
+        return payload
 
     # --- asset browser -------------------------------------------------------------------------
     def _request_page(self, index: int) -> None:

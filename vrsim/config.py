@@ -110,6 +110,11 @@ class EnvironmentConfig:
     # sun and no fill light, so the pergola's shadow on the desk renders almost black.
     shadowless_prims: tuple[str, ...] = ("Pavilion_post*", "Side_lintel*", "Cross_lintel*", "Pergola_rafter*")
     decals: tuple[Decal, ...] = field(default_factory=_studierstube_decals)
+    # Scene objects that become grabbable props: their top-level prims are hidden in the environment
+    # and the sidecar spawns them as one rigid body each (with the decals on them) where they stood.
+    desk_props: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: {"NVIDIA mug": ("Ceramic_mug", "Torus", "Coffee")})
+    desk_prop_mass: float = 0.35  # [kg]
     # Meshes (paths below the scene's root) given a plain material of this linear colour: the mug
     # and its handle (Torus) go black so the NVIDIA logo reads on it.
     prim_colors: dict[str, tuple[float, float, float]] = field(
