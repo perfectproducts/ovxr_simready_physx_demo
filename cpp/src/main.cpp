@@ -1031,26 +1031,28 @@ private:
         }
     }
 
-    Pose spawnPose(const nlohmann::json& msg, int i, int count) const
+    // New props drop beside the user, not on the desk ahead: to the right, then the left, and so on.
+    // A batch stands in a row on that side, running backward from about level with the user.
+    Pose spawnPose(const nlohmann::json& msg, int i, int count, double sideSign) const
     {
         // A scene object made grabbable (sidecar desk_props): exactly where it stood, 2 mm up.
         if (const auto at = msg.value("position", std::vector<double>{}); at.size() == 3)
             return { { at[0], at[1], at[2] + 0.002 + i * 0.2 } };
         const auto size = msg.value("size", std::vector<double>{ 0.2, 0.2, 0.2 });
         const double extent = std::max({ size[0], size[1], size[2] });
-        Vec3 fwd{ 0, 1, 0 }, base{ 0, 0.7, 0 };
-        double z = 1.3;
+        Vec3 fwd{ 0, 1, 0 }, head{ 0, 0, 1.6 };
         if (m_head)
         {
             fwd = m_head->axis({ 0, 0, -1 });
             fwd.z = 0;
             fwd = fwd.length() > 1e-3 ? fwd.normalized() : Vec3{ 0, 1, 0 };
-            base = m_head->p + fwd * (0.6 + 0.5 * extent);
-            z = std::max(m_head->p.z - 0.15, 0.4);
+            head = m_head->p;
         }
-        const Vec3 side = fwd.cross({ 0, 0, 1 });
-        Vec3 p = base + side * ((i - (count - 1) / 2.0) * std::max(0.25, std::max(size[0], size[1]) * 1.2));
-        p.z = z + i * 0.05 - msg.value("bottom_z", 0.0);
+        const Vec3 right = fwd.cross({ 0, 0, 1 });
+        const double spacing = std::max(0.25, std::max(size[0], size[1]) * 1.2);
+        Vec3 p = head + right * (sideSign * (0.55 + 0.5 * extent)) + fwd * (0.15 - i * spacing);
+        // Waist height, so it drops to the floor (the deck) without bouncing far.
+        p.z = std::max(head.z - 0.7, 0.5) + i * 0.05 - msg.value("bottom_z", 0.0);
         return { p, Quat::axisAngle({ 0, 0, 1 }, std::atan2(fwd.y, fwd.x)) };
     }
 
@@ -1067,11 +1069,14 @@ private:
         // The sidecar's wrapper Asset prim: the package plus instanceable = false overs, since
         // ovphysx skips colliders inside instances (vrsim.assets._asset_overs).
         const std::string assetRef = msg.value("asset_ref", "@" + msg.value("root_usd", "") + "@");
+        const double sideSign = m_nextSpawnRight ? 1.0 : -1.0;
+        if (msg.value("position", std::vector<double>{}).empty())
+            m_nextSpawnRight = !m_nextSpawnRight;
         for (int i = 0; i < count; ++i)
         {
             if (m_props.size() >= kMaxProps)
                 removeProp(0);
-            const Mat16 m = mul(correction, spawnPose(msg, i, count).matrix());
+            const Mat16 m = mul(correction, spawnPose(msg, i, count, sideSign).matrix());
             char rows[512];
             std::snprintf(rows, sizeof(rows), "((%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g))",
                           m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
@@ -1171,6 +1176,7 @@ private:
     Clock::time_point m_hudLast = Clock::now();
     const Clock::time_point m_start = Clock::now();
     int m_nextProp = 0;
+    bool m_nextSpawnRight = true;
 };
 
 } // namespace
