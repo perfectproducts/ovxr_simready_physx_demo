@@ -1,0 +1,12 @@
+*.pyc
+.cache/
+.venv/
+__pycache__/
+cpp/_deps/
+cpp/build/
+wit_ai_api.txt
+huggingface_api.txt
+*.log
+*.blend1
+.vs/
+.vscode/

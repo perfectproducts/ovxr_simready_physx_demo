@@ -1,0 +1,4 @@
+*.bat text eol=crlf
+*.hdr binary
+*.usdz binary
+*.blend binary

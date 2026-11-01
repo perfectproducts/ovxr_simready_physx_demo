@@ -1,0 +1,43 @@
+[project]
+name = "vr-simready-physx"
+version = "0.1.0"
+description = "Quest 3 VR sandbox: ovxr RTX rendering + Newton physics + voice-spawned SimReady assets"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "ovrtx==0.6.0.1791947691",
+    "ovstage==0.3.0.1791986420",
+    "ovxr==0.1.0.5842",
+    "newton[importers]",
+    "pyopenxr",
+    "huggingface_hub",
+    "rapidfuzz",
+    "sounddevice",
+    "numpy",
+    "requests",
+    "pillow>=13.0.0",
+    "physx-usd-schemas==25.11.2.72696984",
+    "ovphysx==0.7.0.74035321",
+]
+
+[tool.uv]
+environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
+[tool.uv.sources]
+ovrtx = { index = "nvidia" }
+ovstage = { index = "nvidia" }
+ovxr = { index = "nvidia" }
+
+[project.scripts]
+vrsim = "vrsim.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vrsim"]

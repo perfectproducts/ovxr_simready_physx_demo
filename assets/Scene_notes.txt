@@ -1,0 +1,8 @@
+Studierstube garden study
+Created in Blender. Units: metres. Z up.
+Triangles: 41860
+Static architectural scene; application must supply locomotion, collision and interaction.
+Desk height: 0.82 m. Pavilion: 5.6 x 4.8 m.
+Simple shared PBR materials. No texture dependencies.
+USDZ includes scene lighting and presentation camera.
+VR frame rate depends on headset, renderer and lighting configuration; not headset tested.
