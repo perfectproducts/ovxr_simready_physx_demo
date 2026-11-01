@@ -67,6 +67,7 @@ The C++ app (ovphysx) and its Python sidecar start with one batch file:
 ```powershell
 .\start_vr.bat              # Minimal rendering, 72 fps
 .\start_vr.bat rt2          # full RT2 rendering with the real HDRI sky, about 37 fps
+.\start_vr_rt2.bat          # the same, for double-clicking
 ```
 
 It opens the sidecar (voice, catalog, downloads) in its own window, waits for it to listen on
