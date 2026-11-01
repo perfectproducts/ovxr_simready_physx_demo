@@ -46,6 +46,10 @@ public:
     // rigidly, or one part of it. `linear`/`angular` are in `bodies` order.
     void setBodyVelocities(const std::string& propRoot, const std::vector<ovx_primpath_t>& bodies,
                            const std::vector<Vec3>& linear, const std::vector<Vec3>& angular);
+    // Teleport some bodies of one prop to `poses` (in `bodies` order) and stop them: a prop being
+    // placed jumps to the pointer target instead of being dragged through the furniture.
+    void setBodyPoses(const std::string& propRoot, const std::vector<ovx_primpath_t>& bodies,
+                      const std::vector<Pose>& poses);
     void forgetProp(const std::string& propRoot);
 
 private:
@@ -53,6 +57,7 @@ private:
     // Rigid bodies matching a selection, cached until the next sync under `key` (prefixed by the
     // prop root, so forgetProp finds it).
     ovphysx_query_handle_t selectionQuery(const std::string& key, const ovphysx_query_selection_t& selection);
+    ovphysx_query_handle_t bodiesQuery(const std::string& propRoot, const std::vector<ovx_primpath_t>& bodies);
     // `velocity(path, attribute)`: attribute 0 linear, 1 angular.
     void writeVelocity(ovphysx_query_handle_t query, const std::function<Vec3(ovx_primpath_t, size_t)>& velocity);
 

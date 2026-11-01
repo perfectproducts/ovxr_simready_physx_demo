@@ -819,17 +819,24 @@ private:
         }
     }
 
-    // Hold the non-movable bodies of fixed props at their anchor poses.
+    // Hold the non-movable bodies of fixed props at their anchor poses. Props being placed are
+    // teleported there instead (all bodies), so they never drag through the furniture.
     void driveAnchors(double horizon)
     {
         for (size_t i = 0; i < m_props.size(); ++i)
         {
             const Prop& prop = m_props[i];
+            if (prop.placing)
+            {
+                if (prop.anchor.size() == prop.bodies.size())
+                    m_physics->setBodyPoses(prop.root, prop.bodies, prop.anchor);
+                continue;
+            }
             std::vector<ovx_primpath_t> paths;
             std::vector<Vec3> linear, angular;
             for (size_t b = 0; b < prop.anchor.size(); ++b)
             {
-                const bool part = !prop.placing && b < prop.movable.size() && prop.movable[b];
+                const bool part = b < prop.movable.size() && prop.movable[b];
                 const BodyState* s = part ? nullptr : bodyState(static_cast<int>(i), static_cast<int>(b));
                 if (!s)
                     continue;
