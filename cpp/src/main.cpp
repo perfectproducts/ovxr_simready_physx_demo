@@ -42,6 +42,7 @@ constexpr double kPhysicsDt = 1.0 / 72.0;  // Quest 3 refresh; the scene substep
 constexpr int kMaxProps = 40;
 constexpr double kGrabOn = 0.55, kGrabOff = 0.35, kGrabReach = 0.12, kRayMax = 8.0;
 constexpr double kMaxLinear = 12.0, kMaxAngular = 30.0, kThrowScale = 1.3;
+constexpr double kDeskPropMax = 0.35;  // [m] largest side of a prop that spawns on the desk
 constexpr size_t kHudFloats = 6000 * 4 * 3;  // vrsim.hud.MAX_QUADS quads x 4 corners x xyz
 const char* kHands[2] = { "/World/Hands/Left", "/World/Hands/Right" };
 const char* kRays[2] = { "/World/Hands/LeftRay", "/World/Hands/RightRay" };
@@ -1031,8 +1032,10 @@ private:
         }
     }
 
-    // New props drop beside the user, not on the desk ahead: to the right, then the left, and so on.
-    // A batch stands in a row on that side, running backward from about level with the user.
+    // Where a new prop drops, by its largest side (the sidecar's bounding box, metres): small ones
+    // onto the desk ahead, off to one side of the laptop; larger ones onto the floor beside the user.
+    // Sides alternate right, left, ... per spawn; a batch lines up outward on the desk, or backward
+    // on the floor.
     Pose spawnPose(const nlohmann::json& msg, int i, int count, double sideSign) const
     {
         // A scene object made grabbable (sidecar desk_props): exactly where it stood, 2 mm up.
@@ -1050,9 +1053,18 @@ private:
         }
         const Vec3 right = fwd.cross({ 0, 0, 1 });
         const double spacing = std::max(0.25, std::max(size[0], size[1]) * 1.2);
-        Vec3 p = head + right * (sideSign * (0.55 + 0.5 * extent)) + fwd * (0.15 - i * spacing);
-        // Waist height, so it drops to the floor (the deck) without bouncing far.
-        p.z = std::max(head.z - 0.7, 0.5) + i * 0.05 - msg.value("bottom_z", 0.0);
+        Vec3 p;
+        if (extent <= kDeskPropMax)
+        {
+            p = head + fwd * (0.6 + 0.5 * extent) + right * (sideSign * (0.45 + i * spacing));
+            p.z = std::max(head.z - 0.15, 0.4);
+        }
+        else  // waist height, so it drops to the floor (the deck) without bouncing far
+        {
+            p = head + right * (sideSign * (0.55 + 0.5 * extent)) + fwd * (0.15 - i * spacing);
+            p.z = std::max(head.z - 0.7, 0.5);
+        }
+        p.z += i * 0.05 - msg.value("bottom_z", 0.0);
         return { p, Quat::axisAngle({ 0, 0, 1 }, std::atan2(fwd.y, fwd.x)) };
     }
 
