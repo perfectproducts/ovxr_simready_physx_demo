@@ -7,7 +7,7 @@ one localhost TCP connection carrying JSON lines.
   app -> sidecar   {"t":"talk","on":true|false}          push-to-talk pressed / released
                    {"t":"spawned","name":..,"count":n,"total":k}
                    {"t":"removed","name":..,"total":k}   {"t":"cleared","n":k}
-                   {"t":"fixed"|"unfixed","name":..,"parts":n}   {"t":"nothing_to_fix"}
+                   {"t":"fixed"|"unfixed"|"placed","name":..,"parts":n}   {"t":"nothing_to_fix"}
   sidecar -> app   {"t":"spawn","name":..,"count":n,"root_usd":..,"asset_ref":"@wrapper@</Prop/Asset>","correction":[16],
                     "body_paths":[..],"bottom_z":f,"size":[3],
                     "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..],
@@ -39,7 +39,7 @@ from .browser import PAGE_SIZE, BrowserBuilder, Page
 from .catalog import DownloadCancelled, SimReadyCatalog
 from .config import Config
 from .hud import Feedback, TextLayout, download_progress
-from .scene import write_desk_prop, write_environment
+from .scene import write_desk_prop, write_environment, write_placement_hulls
 from .voice import Command, VoiceListener, start_console
 
 log = logging.getLogger("vrsim.sidecar")
@@ -106,6 +106,7 @@ class Sidecar:
         minimal = write_environment(config, config.generated_dir / "environment_physics_minimal.usda", physics=True,
                                     loading_layer=self.browser.loading_layer(), fake_sky=True)
         log.info("Environment for the C++ app: %s (Minimal rendering: %s)", self.env_path, minimal.name)
+        write_placement_hulls(config, config.generated_dir / "placement_hulls.bin")  # the app aims placements at them
         # Scene objects made grabbable (the NVIDIA mug): spawned where they stood on every connect.
         self.desk_props = []
         self._quiet_spawns = 0
@@ -178,14 +179,19 @@ class Sidecar:
         elif kind == "spawned":
             n, total = msg.get("count", 1), msg.get("total", 0)
             title = f"Added {n} × {msg['name']}" if n > 1 else f"Added {msg['name']}"
-            self.feedback.post("ok", title, f"{total} object{'s' if total != 1 else ''} in the scene · "
-                                            "grip to grab, release to throw")
+            self.feedback.post("ok", title, "point where it should stand · thumbstick turns it · "
+                                            "trigger fixes it there (or grip to just grab it)")
         elif kind == "removed":
             self.feedback.post("ok", f"Removed {msg['name']}", f"{msg.get('total', 0)} objects in the scene")
         elif kind == "cleared":
             n = msg.get("n", 0)
             self.feedback.post("ok" if n else "info", f"Cleared {n} object{'s' if n != 1 else ''}" if n
                                else "Nothing to clear")
+        elif kind == "placed":
+            parts = msg.get("parts", 0)
+            self.feedback.post("ok", f"Placed {msg['name']}",
+                               (f"its {parts} jointed part{'s' if parts != 1 else ''} still move · " if parts else "")
+                               + "hold it and use the thumbstick to turn it · trigger while holding frees it")
         elif kind == "fixed":
             parts = msg.get("parts", 0)
             self.feedback.post("ok", f"Fixed {msg['name']} in place",

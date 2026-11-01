@@ -228,6 +228,59 @@ def _authored_environment(config: Config, physics: bool, fake_sky: bool = False)
 
 DECALS_PATH = "/World/Environment/Decals"
 
+def write_placement_hulls(config: Config, path: Path) -> Path:
+    """The static scene's colliders as convex hulls, for the C++ app to cast placement rays at
+    (ovphysx has no raycast API). Each environment mesh collides as the convex hull of its points
+    (scene._authored_environment), so the same hulls are written: float32 file of hull count,
+    then per hull its plane count, bounds (min xyz, max xyz) and planes (nx, ny, nz, d with
+    n.p + d <= 0 inside), all world metres. The ground is the first hull. Reused while newer than
+    the environment USD and this module."""
+    env = config.environment
+    ground = env.ground_z if env.usd is not None else 0.0
+    sources = [Path(__file__)] + ([Path(env.usd)] if env.usd is not None else [])
+    if path.exists() and all(path.stat().st_mtime > s.stat().st_mtime for s in sources):
+        return path
+
+    def box(lo, hi) -> tuple:
+        planes = [(1, 0, 0, -hi[0]), (-1, 0, 0, lo[0]), (0, 1, 0, -hi[1]), (0, -1, 0, lo[1]),
+                  (0, 0, 1, -hi[2]), (0, 0, -1, lo[2])]
+        return np.array([*lo, *hi]), np.array(planes, dtype=float)
+
+    hulls = [box((-200, -200, ground - 0.1), (200, 200, ground))]
+    if env.usd is not None:
+        from pxr import Usd, UsdGeom
+        from scipy.spatial import ConvexHull, QhullError
+
+        stage = Usd.Stage.Open(str(env.usd))
+        root = stage.GetDefaultPrim()
+        skipped = {*env.hidden_prims, *(p for prims in env.desk_props.values() for p in prims)}
+        cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+        xforms = UsdGeom.XformCache()
+        for prim in Usd.PrimRange(root):
+            if not prim.IsA(UsdGeom.Mesh):
+                continue
+            if prim.GetPath().MakeRelativePath(root.GetPath()).pathString.split("/")[0] in skipped:
+                continue
+            if min(cache.ComputeLocalBound(prim).ComputeAlignedRange().GetSize()) < 0.003:
+                continue  # no collider
+            points = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+            if not points or len(points) < 4:
+                continue
+            m = np.array(xforms.GetLocalToWorldTransform(prim), dtype=float)
+            world = (np.c_[np.array(points, dtype=float), np.ones(len(points))] @ m)[:, :3] + env.offset
+            try:
+                hull = ConvexHull(world)
+            except QhullError:
+                continue
+            hulls.append((np.r_[world.min(0), world.max(0)], hull.equations))
+    out = [np.array([len(hulls)], dtype=np.float32)]
+    for bounds, planes in hulls:
+        out += [np.array([len(planes)], dtype=np.float32), bounds.astype(np.float32), planes.astype(np.float32).ravel()]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(np.concatenate(out).tobytes())
+    log.info("Placement hulls: %s (%d)", path, len(hulls))
+    return path
+
 
 def _decal_mesh(name: str, decal, material: str, indent: str) -> str:
     """A grid in the scene's coordinates with st texture coordinates (v up)."""

@@ -43,6 +43,7 @@ constexpr double kPhysicsDt = 1.0 / 72.0;  // Quest 3 refresh; the scene substep
 constexpr int kMaxProps = 40;
 constexpr double kGrabOn = 0.55, kGrabOff = 0.35, kGrabReach = 0.12, kRayMax = 8.0;
 constexpr double kMaxLinear = 12.0, kMaxAngular = 30.0, kThrowScale = 1.3;
+constexpr double kTurnRate = 1.6;  // [rad/s] thumbstick turning of a placement or a held fixed prop
 constexpr double kDeskPropMax = 0.35;  // [m] largest side of a prop that spawns on the desk
 constexpr size_t kHudFloats = 6000 * 4 * 3;  // vrsim.hud.MAX_QUADS quads x 4 corners x xyz
 const char* kHands[2] = { "/World/Hands/Left", "/World/Hands/Right" };
@@ -148,6 +149,11 @@ struct Prop
     // Fixed in place: per body, the pose its non-movable bodies are held at (velocity-driven every
     // frame); only the jointed parts still move. Empty = free.
     std::vector<Pose> anchor;
+    // Being placed: it follows the pointer ray (all bodies, parts too) until the trigger fixes it.
+    bool placing = false;
+    Pose spawn;                // the pose it was spawned at (its asset origin, before the correction)
+    std::vector<Pose> rel;     // per body: pose relative to `spawn`, captured once physics has it
+    double bottomZ = 0, spacing = 0.25;  // asset bottom below its origin; gap between batch members
     double radius = 0.1, scale = 1.0;
 };
 
@@ -155,6 +161,13 @@ struct Prop
 struct BodyRef
 {
     int prop = -1, body = -1;
+};
+
+// A static scene collider as its convex hull (vrsim.scene.write_placement_hulls): placement rays.
+struct Hull
+{
+    Vec3 lo, hi;
+    std::vector<std::array<double, 4>> planes;  // n.p + d <= 0 inside
 };
 
 struct Hand
@@ -167,6 +180,8 @@ struct Hand
     bool whole = true;
     std::vector<Pose> rel;
     bool pulling = false, squeezing = false, triggerDown = false;
+    bool triggerClicked = false;  // this frame
+    Pose grip;
     std::deque<std::pair<double, Vec3>> history;  // (time, grip position)
     double rayLength = 0;
     Vec3 lastAngular;
@@ -223,6 +238,7 @@ public:
     {
         m_stage = std::make_unique<Stage>(envUsd, schemasRoot, minimalRendering);
         m_physics = std::make_unique<Physics>(*m_stage, 1);  // environment was populated at ordinal 1
+        loadHulls((std::filesystem::path(envUsd).parent_path() / "placement_hulls.bin").string());
 
         const ovxr_setting_entry_t entries[] = {
             ovxr_setting_entry_int(OVXR_SETTING_DISPLAY_MODE, OVXR_DISPLAY_MODE_STEREO),
@@ -299,6 +315,7 @@ public:
                 continue;
             }
             const double dt = std::min(seconds(last, now), 0.1);
+            m_dt = dt;
             last = now;
 
             if (!m_xr)
@@ -316,6 +333,8 @@ public:
                 buttons(input);
                 browserGrab(input);  // before interact(): grip on the handle must not grab props
                 interact(input, seconds(m_start, now));
+                place(input);
+                turnFixed(input);
                 browserInteract(input);
                 hudInteract(input);
             }
@@ -481,9 +500,11 @@ private:
 
             // Trigger while holding a prop whole: fix it where it is, or free a fixed one.
             const bool click = hi.trigger > (hand.triggerDown ? 0.3f : 0.7f);
-            if (click && !hand.triggerDown && hand.prop >= 0 && hand.whole)
-                setFixed(hand.prop, m_props[hand.prop].anchor.empty());
+            hand.triggerClicked = click && !hand.triggerDown;
             hand.triggerDown = click;
+            hand.grip = hi.grip;
+            if (hand.triggerClicked && hand.prop >= 0 && hand.whole && !m_props[hand.prop].placing)
+                setFixed(hand.prop, m_props[hand.prop].anchor.empty());
 
             hand.rayLength = 0;
             if (hand.prop < 0 && hi.aimValid && hi.trigger > 0.1f)
@@ -507,7 +528,12 @@ private:
         if (!body)
             return;
         Hand& other = m_hands[1 - h];
-        const Prop& prop = m_props[ref->prop];
+        Prop& prop = m_props[ref->prop];
+        if (prop.placing)  // grabbed while being placed: an ordinary loose prop now
+        {
+            prop.placing = false;
+            prop.anchor.clear();
+        }
         const bool fixed = !prop.anchor.empty();
         const bool movable = ref->body < static_cast<int>(prop.movable.size()) && prop.movable[ref->body];
         // A part moves alone while the prop is fixed, or while the other hand holds the rest.
@@ -574,6 +600,8 @@ private:
             if (m_hands[h].prop == index)
             {
                 m_hands[h].pulling = false;
+                if (const BodyState* s = bodyState(index, m_hands[h].body))  // it may have been turned
+                    m_hands[h].offset = m_hands[h].grip.inverse() * s->pose;
                 if (m_hands[h].whole)
                     captureWhole(m_hands[h]);
                 m_xr->haptic(h, fixed ? 0.8f : 0.5f, fixed ? 0.08f : 0.04f);
@@ -598,6 +626,199 @@ private:
             setFixed(index, fixed);
     }
 
+    void loadHulls(const std::string& path)
+    {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+            logf("Placement: no %s; new props drop instead", path.c_str());
+            return;
+        }
+        const auto bytes = static_cast<size_t>(file.tellg());
+        std::vector<float> data(bytes / sizeof(float));
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size() * sizeof(float)));
+        size_t i = 0;
+        const size_t count = data.empty() ? 0 : static_cast<size_t>(data[i++]);
+        for (size_t h = 0; h < count && i + 7 <= data.size(); ++h)
+        {
+            Hull hull;
+            const size_t planes = static_cast<size_t>(data[i]);
+            hull.lo = { data[i + 1], data[i + 2], data[i + 3] };
+            hull.hi = { data[i + 4], data[i + 5], data[i + 6] };
+            i += 7;
+            for (size_t p = 0; p < planes && i + 4 <= data.size(); ++p, i += 4)
+                hull.planes.push_back({ data[i], data[i + 1], data[i + 2], data[i + 3] });
+            m_hulls.push_back(std::move(hull));
+        }
+        logf("Placement: %zu scene hulls from %s", m_hulls.size(), path.c_str());
+    }
+
+    // First scene collider a ray hits: distance and the surface normal there.
+    std::optional<std::pair<double, Vec3>> castScene(const Vec3& origin, const Vec3& dir) const
+    {
+        std::optional<std::pair<double, Vec3>> best;
+        for (const Hull& hull : m_hulls)
+        {
+            double t0 = 0, t1 = best ? best->first : kRayMax;
+            // slab test on the bounds first
+            bool miss = false;
+            for (int a = 0; a < 3 && !miss; ++a)
+            {
+                const double o = a == 0 ? origin.x : a == 1 ? origin.y : origin.z;
+                const double d = a == 0 ? dir.x : a == 1 ? dir.y : dir.z;
+                const double lo = a == 0 ? hull.lo.x : a == 1 ? hull.lo.y : hull.lo.z;
+                const double hi = a == 0 ? hull.hi.x : a == 1 ? hull.hi.y : hull.hi.z;
+                if (std::abs(d) < 1e-12)
+                    miss = o < lo || o > hi;
+                else
+                {
+                    double ta = (lo - o) / d, tb = (hi - o) / d;
+                    if (ta > tb)
+                        std::swap(ta, tb);
+                    t0 = std::max(t0, ta);
+                    t1 = std::min(t1, tb);
+                    miss = t0 > t1;
+                }
+            }
+            if (miss)
+                continue;
+            t0 = 0;
+            t1 = best ? best->first : kRayMax;
+            Vec3 normal{ 0, 0, 1 };
+            for (const auto& pl : hull.planes)
+            {
+                const Vec3 n{ pl[0], pl[1], pl[2] };
+                const double den = n.dot(dir), num = -(n.dot(origin) + pl[3]);
+                if (std::abs(den) < 1e-12)
+                {
+                    if (num < 0)
+                    {
+                        t0 = t1 + 1;
+                        break;
+                    }
+                }
+                else if (den < 0)
+                {
+                    if (num / den > t0)
+                        t0 = num / den, normal = n;
+                }
+                else
+                    t1 = std::min(t1, num / den);
+                if (t0 > t1)
+                    break;
+            }
+            if (t0 <= t1 && t0 > 0)
+                best = std::make_pair(t0, normal);
+        }
+        return best;
+    }
+
+    // Props being placed follow the pointer ray of one hand (the right, or the one whose trigger is
+    // touched alone) onto upward-facing scene surfaces, standing on them; the thumbstick turns
+    // them, the trigger fixes them there. A batch stands in a row across the ray.
+    void place(const InputFrame& in)
+    {
+        std::vector<int> group;
+        for (size_t i = 0; i < m_props.size(); ++i)
+            if (m_props[i].placing)
+                group.push_back(static_cast<int>(i));
+        if (group.empty())
+            return;
+        for (int h = 0; h < 2; ++h)
+            if (in.hands[h].trigger > 0.2f && in.hands[1 - h].trigger < 0.05f && m_hands[h].prop < 0)
+                m_placeHand = h;
+        const HandInput& hi = in.hands[m_placeHand];
+        Hand& hand = m_hands[m_placeHand];
+        if (!hi.aimValid || hand.prop >= 0)
+            return;
+        const Vec3 dir = hi.aim.axis({ 0, 0, -1 });
+        const auto hit = castScene(hi.aim.p, dir);
+        hand.rayLength = hit ? hit->first : kRayMax * 0.4;
+        if (hit && hit->second.z > 0.6)
+        {
+            m_placeAt = hi.aim.p + dir * hit->first;
+            Vec3 side = dir.cross({ 0, 0, 1 });
+            m_placeSide = side.length() > 1e-3 ? side.normalized() : Vec3{ 1, 0, 0 };
+            m_placeValid = true;
+        }
+        if (std::abs(hi.thumbX) > 0.25f)
+            m_placeYaw -= hi.thumbX * kTurnRate * m_dt;
+        if (!m_placeValid)
+            return;
+        const int n = static_cast<int>(group.size());
+        for (int k = 0; k < n; ++k)
+        {
+            Prop& prop = m_props[group[k]];
+            if (prop.rel.size() != prop.bodies.size())
+            {
+                std::vector<Pose> rel;
+                for (size_t b = 0; b < prop.bodies.size(); ++b)
+                    if (const BodyState* s = bodyState(group[k], static_cast<int>(b)))
+                        rel.push_back(prop.spawn.inverse() * s->pose);
+                if (rel.size() != prop.bodies.size())
+                    continue;  // not simulated yet
+                prop.rel = std::move(rel);
+            }
+            const Pose base{ m_placeAt + m_placeSide * ((k - (n - 1) / 2.0) * prop.spacing) + Vec3{ 0, 0, -prop.bottomZ + 0.002 },
+                             Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) };
+            prop.anchor.assign(prop.bodies.size(), Pose{});
+            for (size_t b = 0; b < prop.bodies.size(); ++b)
+                prop.anchor[b] = base * prop.rel[b];
+        }
+        if (hand.triggerClicked)
+        {
+            for (int index : group)
+            {
+                Prop& prop = m_props[index];
+                prop.placing = false;
+                if (prop.anchor.empty())  // never simulated: let it drop where it is
+                    continue;
+                const int parts = static_cast<int>(std::count(prop.movable.begin(), prop.movable.end(), true));
+                m_link.send({ { "t", "placed" }, { "name", prop.name }, { "parts", parts }, { "count", n } });
+                m_lastProp = index;
+            }
+            m_xr->haptic(m_placeHand, 0.8f, 0.08f);
+            m_placeValid = false;
+        }
+    }
+
+    // Thumbstick left/right while holding a fixed prop turns it about its centre's vertical axis,
+    // so it stays standing where it is.
+    void turnFixed(const InputFrame& in)
+    {
+        for (int h = 0; h < 2; ++h)
+        {
+            const Hand& hand = m_hands[h];
+            const float x = in.hands[h].thumbX;
+            if (hand.prop < 0 || !hand.whole || std::abs(x) < 0.25f)
+                continue;
+            Prop& prop = m_props[hand.prop];
+            if (prop.anchor.empty() || prop.placing)
+                continue;
+            Vec3 center;
+            int n = 0;
+            for (size_t b = 0; b < prop.anchor.size(); ++b)
+            {
+                if (b < prop.movable.size() && prop.movable[b])
+                    continue;
+                const Pose& a = prop.anchor[b];
+                center = center + (b < prop.spheres.size() ? a.p + a.q.rotate({ prop.spheres[b][0], prop.spheres[b][1], prop.spheres[b][2] }) : a.p);
+                ++n;
+            }
+            if (n == 0)
+                continue;
+            center = center * (1.0 / n);
+            const Quat turn = Quat::axisAngle({ 0, 0, 1 }, -x * kTurnRate * m_dt);
+            for (Pose& a : prop.anchor)
+            {
+                Vec3 off = a.p - center;
+                off = turn.rotate(off);
+                a = Pose{ Vec3{ center.x + off.x, center.y + off.y, a.p.z }, (turn * a.q).normalized() };
+            }
+        }
+    }
+
     // Hold the non-movable bodies of fixed props at their anchor poses.
     void driveAnchors(double horizon)
     {
@@ -608,7 +829,8 @@ private:
             std::vector<Vec3> linear, angular;
             for (size_t b = 0; b < prop.anchor.size(); ++b)
             {
-                const BodyState* s = b < prop.movable.size() && prop.movable[b] ? nullptr : bodyState(static_cast<int>(i), static_cast<int>(b));
+                const bool part = !prop.placing && b < prop.movable.size() && prop.movable[b];
+                const BodyState* s = part ? nullptr : bodyState(static_cast<int>(i), static_cast<int>(b));
                 if (!s)
                     continue;
                 const Pose& t = prop.anchor[b];
@@ -964,6 +1186,11 @@ private:
         return index < m_browser.count ? index : -1;
     }
 
+    bool placingAny() const
+    {
+        return std::any_of(m_props.begin(), m_props.end(), [](const Prop& p) { return p.placing; });
+    }
+
     void browserInteract(const InputFrame& in)
     {
         for (int h = 0; h < 2; ++h)
@@ -984,7 +1211,7 @@ private:
             const bool down = hi.trigger > (m_browser.triggerDown[h] ? 0.5f : 0.7f);
             const bool pressed = down && !m_browser.triggerDown[h];
             m_browser.triggerDown[h] = down;
-            if (!hi.aimValid || m_hands[h].prop >= 0 || hudInFront(hi))  // the info panel occludes it
+            if (!hi.aimValid || m_hands[h].prop >= 0 || placingAny() || hudInFront(hi))  // the info panel occludes it
                 continue;
             const auto hit = browserHit(hi.aim.p, hi.aim.axis({ 0, 0, -1 }));
             if (!hit)
@@ -1027,6 +1254,8 @@ private:
         for (int h = 0; h < 2; ++h)  // a thumbstick flick pages
         {
             const float x = in.hands[h].thumbX;
+            if (m_hands[h].prop >= 0 || placingAny())  // the stick turns a held fixed prop or a placement
+                continue;
             if (m_browser.stickArmed[h] && std::abs(x) > 0.7f)
             {
                 m_link.send({ { "t", "browser_page" }, { "delta", x > 0 ? 1 : -1 } });
@@ -1166,13 +1395,30 @@ private:
         // ovphysx skips colliders inside instances (vrsim.assets._asset_overs).
         const std::string assetRef = msg.value("asset_ref", "@" + msg.value("root_usd", "") + "@");
         const double sideSign = m_nextSpawnRight ? 1.0 : -1.0;
-        if (msg.value("position", std::vector<double>{}).empty())
+        // Catalog and voice spawns are placed with the pointer; scene props (the mug) stand where they were.
+        const bool catalogSpawn = msg.value("position", std::vector<double>{}).empty();
+        const bool placed = catalogSpawn && !m_hulls.empty();
+        if (catalogSpawn)
             m_nextSpawnRight = !m_nextSpawnRight;
+        if (placed)
+        {
+            for (Prop& p : m_props)  // an unfinished placement drops where it is
+                if (p.placing)
+                    p.placing = false, p.anchor.clear();
+            Vec3 fwd = m_head ? m_head->axis({ 0, 0, -1 }) : Vec3{ 0, 1, 0 };
+            m_placeYaw = std::atan2(fwd.y, fwd.x);
+        }
+        const double spacing = std::max(0.25, std::max(size[0], size[1]) * 1.2);
         for (int i = 0; i < count; ++i)
         {
             if (m_props.size() >= kMaxProps)
                 removeProp(0);
-            const Mat16 m = mul(correction, spawnPose(msg, i, count, sideSign).matrix());
+            Pose pose = spawnPose(msg, i, count, sideSign);
+            if (placed && m_placeValid)  // straight at the pointer's last target, so it needn't fly there
+                pose = { m_placeAt + m_placeSide * ((i - (count - 1) / 2.0) * spacing) +
+                             Vec3{ 0, 0, 0.01 - msg.value("bottom_z", 0.0) },
+                         Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) };
+            const Mat16 m = mul(correction, pose.matrix());
             char rows[512];
             std::snprintf(rows, sizeof(rows), "((%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g), (%.9g, %.9g, %.9g, %.9g))",
                           m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
@@ -1202,6 +1448,10 @@ private:
             if (prop.spheres.size() != prop.bodies.size())
                 prop.spheres.clear();
             prop.movable = msg.value("body_movable", std::vector<bool>{});
+            prop.placing = placed;
+            prop.spawn = pose;
+            prop.bottomZ = msg.value("bottom_z", 0.0);
+            prop.spacing = spacing;
             m_props.push_back(std::move(prop));
         }
         rebuildBodyMap();
@@ -1274,7 +1524,13 @@ private:
     const Clock::time_point m_start = Clock::now();
     int m_nextProp = 0;
     bool m_nextSpawnRight = true;
-    int m_lastProp = -1;  // the prop a hand last let go of (target of "fix it")
+    int m_lastProp = -1;
+    std::vector<Hull> m_hulls;
+    double m_dt = 1.0 / 72;
+    int m_placeHand = 1;
+    bool m_placeValid = false;  // m_placeAt is a surface the pointer found
+    Vec3 m_placeAt, m_placeSide{ 1, 0, 0 };
+    double m_placeYaw = 0;  // the prop a hand last let go of (target of "fix it")
 };
 
 } // namespace
