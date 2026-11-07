@@ -202,3 +202,10 @@ tests/smoke_headless.py   catalog -> physics -> grab -> throw, no headset needed
   `SUN_INTENSITY`). The Kit-typical 1000+ washes everything out to flat grey.
 - With Link active, pass `--mic` with the headset microphone. Otherwise the Windows default
   input is used (on this machine, a HyperX Quadcast).
+
+## License
+
+[MIT](LICENSE). This covers this repository's own code and documents. Third-party items keep their
+own terms: the logos in `assets/logos/` are trademarks of their owners (see `SOURCES.txt`), the HDRI
+in `assets/hdri/` is CC0 from Poly Haven, and the NVIDIA libraries and SimReady assets the app
+downloads are under their own licenses.
