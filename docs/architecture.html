@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VRSim SimReady Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single technical reading column (~72ch) with wide figures and tables breaking out to 1100px. */
+:root {
+  --bg: #f5f7f8;
+  --surface: #ffffff;
+  --ink: #15202b;
+  --muted: #56636f;
+  --line: #d5dde3;
+  --accent: #0a7c6f;      /* C++ app / per-frame path */
+  --accent-2: #8a4fd6;    /* Python sidecar / slow path */
+  --accent-3: #c26a12;    /* external services */
+  --code-bg: #eaf0f2;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151a; --surface: #161e25; --ink: #e3e9ee; --muted: #93a1ad; --line: #2b3741;
+    --accent: #3cc4b2; --accent-2: #b48cf0; --accent-3: #f0a35a; --code-bg: #1c262e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151a; --surface: #161e25; --ink: #e3e9ee; --muted: #93a1ad; --line: #2b3741;
+  --accent: #3cc4b2; --accent-2: #b48cf0; --accent-3: #f0a35a; --code-bg: #1c262e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 80px;
+}
+main { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.prose { max-width: 72ch; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 4.5vw, 3rem); font-weight: 800; letter-spacing: -0.01em; }
+h2 { font-size: 1.6rem; font-weight: 700; }
+h3 { font-size: 1.1rem; font-weight: 700; }
+p { margin: 0; }
+.eyebrow { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.85rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.figure svg { display: block; min-width: 900px; width: 100%; height: auto; }
+svg text { font-family: var(--body); fill: var(--ink); }
+svg .small { font-size: 11px; fill: var(--muted); }
+svg .mono { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+svg .title { font-family: var(--display); font-weight: 700; font-size: 14px; }
+svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+svg .cpp { fill: none; stroke: var(--accent); stroke-width: 2; }
+svg .py { fill: none; stroke: var(--accent-2); stroke-width: 2; }
+svg .ext { fill: none; stroke: var(--accent-3); stroke-width: 1.6; stroke-dasharray: 5 4; }
+svg .arrow { stroke: var(--muted); stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+svg .arrow.acc { stroke: var(--accent); }
+svg .arrow.acc2 { stroke: var(--accent-2); }
+svg #ah path { fill: var(--muted); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card h3 { display: flex; align-items: baseline; gap: 8px; }
+.tag { font-family: var(--mono); font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; border: 1px solid currentColor; font-weight: 500; }
+.t-cpp { color: var(--accent); } .t-py { color: var(--accent-2); } .t-ext { color: var(--accent-3); }
+.card ul, .prose ul, .prose ol { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.card p, .card li { font-size: 0.93rem; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 640px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-left: 2px solid var(--line); }
+.steps li { position: relative; padding: 6px 0 14px 22px; }
+.steps li::before { content: ""; position: absolute; left: -7px; top: 13px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--c, var(--accent)); }
+.steps .who { font-family: var(--mono); font-size: 0.75rem; color: var(--c, var(--accent)); }
+.steps p { font-size: 0.95rem; max-width: 80ch; }
+.bar { display: flex; height: 26px; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); font-family: var(--mono); font-size: 0.7rem; }
+.bar div { display: flex; align-items: center; justify-content: center; color: var(--bg); white-space: nowrap; overflow: hidden; }
+.note { border-left: 3px solid var(--accent-3); padding: 8px 14px; background: var(--surface); font-size: 0.93rem; max-width: 80ch; }
+.status { display: inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 1px 7px; border-radius: 10px; background: var(--code-bg); color: var(--muted); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+
+<main>
+  <header style="display:flex;flex-direction:column;gap:14px">
+    <p class="eyebrow">VRSimReadyPhysx · technical description · Nov 2026</p>
+    <h1>VR SimReady Physics: how the parts interact</h1>
+    <p class="lede">A Meta Quest 3 app over Link that renders a USD scene with NVIDIA's ovxr / ovrtx stack, simulates it with ovphysx (PhysX), and lets you add SimReady assets from Hugging Face by voice or from an in‑VR catalog, then grab, throw and fix them in place.</p>
+    <div class="legend">
+      <span style="--c:var(--accent)">C++ app: everything per frame</span>
+      <span style="--c:var(--accent-2)">Python sidecar: everything slow</span>
+      <span style="--c:var(--accent-3)">External service or device</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>System overview</h2>
+    <p class="prose">Two processes share the work. The native app <code>cpp/build/vrsim_cpp.exe</code> owns the OpenXR session, the shared USD stage, the renderer and physics, and must hit the 72&nbsp;Hz frame budget. The Python sidecar <code>vrsim/sidecar.py</code> does work that may take seconds: speech recognition, catalog search, downloads, USD preparation, and rasterizing HUD text and catalog pages. They talk over one localhost TCP socket carrying JSON lines. Large data never crosses the socket; the sidecar writes USD layers to <code>.cache/generated/</code> and sends their paths.</p>
+    <div class="figure" role="img" aria-label="Block diagram: Quest 3 connects over Link to the C++ app, which contains XrInput, the frame loop, Physics (ovphysx) and Stage (ovstage plus ovrtx renderer). The C++ app talks over TCP port 47800 to the Python sidecar, which contains voice, catalog, asset preparation, browser pages, HUD and scene generation. The sidecar calls Wit.ai, the Hugging Face Hub and SimReady Central, and writes USD layers to .cache/generated that the stage references.">
+      <svg viewBox="0 0 980 560" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+
+        <!-- Quest -->
+        <rect x="20" y="40" width="170" height="150" rx="6" class="ext"/>
+        <text x="36" y="66" class="title">Meta Quest 3</text>
+        <text x="36" y="88" class="small">display 72 Hz, controllers,</text>
+        <text x="36" y="104" class="small">headset microphone</text>
+        <text x="36" y="134" class="mono">Link · OpenXR runtime</text>
+        <text x="36" y="150" class="mono">(Meta Horizon / OVRServer)</text>
+
+        <!-- C++ app -->
+        <rect x="250" y="20" width="440" height="250" rx="8" class="cpp"/>
+        <text x="266" y="44" class="title" style="fill:var(--accent)">vrsim_cpp.exe  (C++)</text>
+        <rect x="266" y="58" width="130" height="80" rx="4" class="box"/>
+        <text x="276" y="78" class="title" style="font-size:12px">XrInput</text>
+        <text x="276" y="96" class="small">grip / aim poses,</text>
+        <text x="276" y="110" class="small">squeeze, trigger,</text>
+        <text x="276" y="124" class="small">A/B/X/Y, thumbstick</text>
+        <rect x="410" y="58" width="130" height="80" rx="4" class="box"/>
+        <text x="420" y="78" class="title" style="font-size:12px">App frame loop</text>
+        <text x="420" y="96" class="small">grab · fix · spawn</text>
+        <text x="420" y="110" class="small">placement · catalog</text>
+        <text x="420" y="124" class="small">pointer · HUD pose</text>
+        <rect x="554" y="58" width="122" height="80" rx="4" class="box"/>
+        <text x="564" y="78" class="title" style="font-size:12px">Physics</text>
+        <text x="564" y="96" class="small">ovphysx (PhysX 5)</text>
+        <text x="564" y="110" class="small">step 144 Hz, body</text>
+        <text x="564" y="124" class="small">poses, velocity writes</text>
+        <rect x="266" y="158" width="410" height="96" rx="4" class="box"/>
+        <text x="276" y="178" class="title" style="font-size:12px">Stage: ovstage shared USD stage + ovrtx renderer, driven by ovxr</text>
+        <text x="276" y="198" class="small">One application-owned ordinal per frame; body / hand / HUD transforms written at ordinal N,</text>
+        <text x="276" y="214" class="small">bind_frame(N) seals and renders it. Spawns and removals get their own sealed ordinals,</text>
+        <text x="276" y="230" class="small">and only those are drained into ovphysx. Render mode: RT2 (path traced) or Minimal.</text>
+        <path d="M331 138 V148 H475 V138" class="arrow acc" style="marker-end:none"/>
+        <path d="M396 98 H408" class="arrow acc"/>
+        <path d="M540 98 H552" class="arrow acc"/>
+        <path d="M615 138 V156" class="arrow acc"/>
+        <path d="M475 138 V156" class="arrow acc"/>
+
+        <!-- Quest <-> app -->
+        <path d="M190 100 H248" class="arrow"/>
+        <path d="M248 120 H192" class="arrow"/>
+        <text x="196" y="92" class="mono">input</text>
+        <text x="196" y="138" class="mono">frames</text>
+
+        <!-- TCP -->
+        <path d="M470 270 V320" class="arrow"/>
+        <path d="M500 320 V272" class="arrow"/>
+        <text x="510" y="300" class="mono">JSON lines · TCP 127.0.0.1:47800</text>
+
+        <!-- Sidecar -->
+        <rect x="250" y="322" width="440" height="218" rx="8" class="py"/>
+        <text x="266" y="346" class="title" style="fill:var(--accent-2)">vrsim.sidecar  (Python, uv)</text>
+        <rect x="266" y="360" width="130" height="74" rx="4" class="box"/>
+        <text x="276" y="380" class="title" style="font-size:12px">voice.py</text>
+        <text x="276" y="398" class="small">push-to-talk audio,</text>
+        <text x="276" y="412" class="small">intent / regex parse</text>
+        <rect x="410" y="360" width="130" height="74" rx="4" class="box"/>
+        <text x="420" y="380" class="title" style="font-size:12px">catalog.py</text>
+        <text x="420" y="398" class="small">index, search, sizes,</text>
+        <text x="420" y="412" class="small">package download</text>
+        <rect x="554" y="360" width="122" height="74" rx="4" class="box"/>
+        <text x="564" y="380" class="title" style="font-size:12px">assets.py</text>
+        <text x="564" y="398" class="small">wrapper layer, bodies,</text>
+        <text x="564" y="412" class="small">spheres, joints</text>
+        <rect x="266" y="446" width="130" height="78" rx="4" class="box"/>
+        <text x="276" y="466" class="title" style="font-size:12px">hud.py</text>
+        <text x="276" y="484" class="small">text → quad points</text>
+        <text x="276" y="498" class="small">(base64 float32)</text>
+        <rect x="410" y="446" width="130" height="78" rx="4" class="box"/>
+        <text x="420" y="466" class="title" style="font-size:12px">browser.py</text>
+        <text x="420" y="484" class="small">thumbnail tile pages</text>
+        <text x="420" y="498" class="small">as USD layers</text>
+        <rect x="554" y="446" width="122" height="78" rx="4" class="box"/>
+        <text x="564" y="466" class="title" style="font-size:12px">scene.py · config.py</text>
+        <text x="564" y="484" class="small">environment, decals,</text>
+        <text x="564" y="498" class="small">desk props</text>
+
+        <!-- External services -->
+        <rect x="760" y="330" width="200" height="56" rx="6" class="ext"/>
+        <text x="774" y="352" class="title" style="font-size:13px">Wit.ai /speech</text>
+        <text x="774" y="372" class="small">transcript + intents</text>
+        <rect x="760" y="400" width="200" height="66" rx="6" class="ext"/>
+        <text x="774" y="422" class="title" style="font-size:13px">Hugging Face Hub</text>
+        <text x="774" y="440" class="small">SimReady dataset repos,</text>
+        <text x="774" y="454" class="small">thumbnails, packages</text>
+        <rect x="760" y="478" width="200" height="56" rx="6" class="ext"/>
+        <text x="774" y="500" class="title" style="font-size:13px">SimReady Central</text>
+        <text x="774" y="520" class="small">USD Search (HF Space)</text>
+        <path d="M396 386 C 560 300, 700 330, 758 352" class="arrow acc2"/>
+        <path d="M540 404 C 640 420, 700 432, 758 432" class="arrow acc2"/>
+        <path d="M540 420 C 640 470, 700 500, 758 504" class="arrow acc2"/>
+
+        <!-- mic path -->
+        <path d="M105 190 V 397 H 264" class="arrow"/>
+        <text x="112" y="300" class="mono">mic as Windows</text>
+        <text x="112" y="314" class="mono">input device</text>
+
+        <!-- generated layers -->
+        <rect x="760" y="120" width="200" height="120" rx="6" class="box"/>
+        <text x="774" y="142" class="title" style="font-size:13px">.cache/generated/</text>
+        <text x="774" y="162" class="mono">environment_physics*.usda</text>
+        <text x="774" y="178" class="mono">asset wrappers</text>
+        <text x="774" y="194" class="mono">browser page layers</text>
+        <text x="774" y="210" class="mono">desk_prop_nvidia_mug.usda</text>
+        <text x="774" y="226" class="small">+ HF cache (packages)</text>
+        <path d="M690 470 C 730 440, 740 300, 800 242" class="arrow acc2"/>
+        <path d="M758 200 H 678" class="arrow acc"/>
+        <text x="700" y="192" class="mono">referenced</text>
+      </svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>Components</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Quest 3 over Link <span class="tag t-ext">device</span></h3>
+        <p>The Meta OpenXR runtime on the PC renders to the headset over Quest Link. ovxr creates the OpenXR session; <code>XrInput</code> borrows its handles and adds its own action set for the Touch controllers. The headset microphone shows up as the Windows input device “Headset Microphone (Oculus Virtual Audio Device)”, which the sidecar records directly.</p>
+      </div>
+      <div class="card">
+        <h3>ovxr + ovrtx renderer <span class="tag t-cpp">C++</span></h3>
+        <p>ovxr runs the split frame loop (<code>begin_frame → bind_frame → submit_frame</code>) and renders the stage with ovrtx. Two modes, chosen with <code>--render</code>:</p>
+        <ul>
+          <li><b>RT2</b>: real-time path tracing with the HDRI dome sky. Bind costs about 9–11&nbsp;ms per frame; the headset runs between 36 and 72&nbsp;fps.</li>
+          <li><b>Minimal</b>: rasterized, with a generated backdrop sky. Holds 72&nbsp;fps.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>ovstage shared stage <span class="tag t-cpp">C++</span></h3>
+        <p>One USD stage seen by both renderer and physics. The app holds one ordinal at a time: per-frame transform writes go into ordinal N, which <code>bind_frame</code> seals. Population changes (spawn, remove, catalog page) are committed at their own sealed ordinals. ovphysx drains only those ordinals, never the per-frame transforms it produced itself.</p>
+      </div>
+      <div class="card">
+        <h3>ovphysx (PhysX) <span class="tag t-cpp">C++</span></h3>
+        <p><code>physics.cpp</code> attaches ovphysx to the stage, steps at a fixed 1/72&nbsp;s with 144&nbsp;Hz substeps (at most 3 steps per frame), reads every dynamic body's pose in one query, and writes linear/angular velocities. Velocity writes use cached selection queries per prop and body set, released when a prop is removed.</p>
+      </div>
+      <div class="card">
+        <h3>Python sidecar <span class="tag t-py">Python</span></h3>
+        <p>Started with <code>uv run python -m vrsim.sidecar</code>. Writes the environment layers at startup, then waits on port 47800. Worker pools keep slow jobs off the socket thread: spawn/download, catalog page building, and hover info. A <code>Feedback</code> board turns any status message into HUD geometry.</p>
+      </div>
+      <div class="card">
+        <h3>Wit.ai voice <span class="tag t-ext">service</span></h3>
+        <p>Holding A or X records audio (with 0.5&nbsp;s pre-roll); on release it goes to Wit.ai's <code>/speech</code> endpoint. Trained intents are used when confident, otherwise regexes parse the transcript: <i>add a mug</i>, <i>show me balls</i>, <i>next page</i>, <i>undo</i>, <i>clear all</i>, <i>fix it</i>, <i>free it</i>, <i>cancel</i>.</p>
+      </div>
+      <div class="card">
+        <h3>SimReady on Hugging Face <span class="tag t-ext">service</span></h3>
+        <p>The catalog merges the <code>nvidia/simready-catalog</code> index with a crawl of partner repos (about 2,800 assets, cached in <code>.cache/catalog_index.json</code>). Searches go to SimReady Central (NVIDIA USD Search on an HF Space) first, which also returns bounding-box dimensions, and fall back to the local index. Packages download with the Hub client into the HF cache.</p>
+      </div>
+      <div class="card">
+        <h3>Generated USD layers <span class="tag t-py">Python</span></h3>
+        <p><code>scene.py</code> writes the environment (Studierstube scene, floor and colliders, lights, hands, HUD panel, decals) in RT2 and Minimal variants. <code>assets.py</code> writes one wrapper per asset that normalizes it to Z-up metres. <code>browser.py</code> writes each catalog page as a layer of textured quads.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>One frame, step by step</h2>
+    <p class="prose">From <code>main.cpp</code>'s loop. Times are averages from the app's status log on an RTX 6000 Ada.</p>
+    <ol class="steps">
+      <li><span class="who">ovxr_begin_frame</span><p>Gets the frame plan and predicted display time. If the OpenXR session isn't running (headset off), the loop only drains sidecar messages and sleeps 50&nbsp;ms.</p></li>
+      <li><span class="who">XrInput::sync</span><p>Controller grip and aim poses at the predicted display time, plus button edges. Then buttons (talk, undo, clear), catalog grab, hand interaction (grab, release, trigger-to-fix), catalog pointer and the HUD close button.</p></li>
+      <li><span class="who">driveGrabs · driveAnchors</span><p>Every held or fixed body gets one velocity that reaches its target pose by the end of this frame's physics steps: <code>v = (target − pose) / (steps · dt)</code>, clamped to 12&nbsp;m/s and 30&nbsp;rad/s. About 0.0–0.1&nbsp;ms.</p></li>
+      <li><span class="who">Physics::step × 1–3</span><p>Fixed 1/72&nbsp;s steps against real time. 0.25–0.5&nbsp;ms per frame.</p></li>
+      <li><span class="who">readBodies · writeBodies · writeVisuals</span><p>Body poses out of ovphysx, then body, hand, ray, HUD, catalog and spinner transforms (and changed HUD text points) written to the stage at ordinal N. About 0.2&nbsp;ms.</p></li>
+      <li><span class="who">ovxr_bind_frame(N)</span><p>Seals ordinal N and renders it. This is where the frame time goes: about 9–11&nbsp;ms in RT2.</p></li>
+      <li><span class="who">ovxr_submit_frame · handleSidecar</span><p>Submits to the compositor (about 1&nbsp;ms), then applies queued sidecar messages: spawns, removals, catalog pages, HUD text.</p></li>
+    </ol>
+    <div class="prose" style="display:flex;flex-direction:column;gap:6px">
+      <p class="eyebrow">CPU time per frame, RT2, logged (13.9 ms budget at 72 Hz)</p>
+      <div class="bar" aria-label="Bind 10.5 ms, submit 1.1 ms, step 0.3 ms, other 0.3 ms of a 13.9 ms budget">
+        <div style="flex:10.5;background:var(--accent)">bind 10.5</div>
+        <div style="flex:1.1;background:var(--accent-2)">1.1</div>
+        <div style="flex:0.6;background:var(--accent-3)"></div>
+        <div style="flex:1.7;background:var(--line)"></div>
+      </div>
+      <p class="small" style="font-size:0.85rem;color:var(--muted)">bind · submit · step+read+write · headroom. GPU time comes on top, so RT2 often misses the deadline and the runtime drops to 36&nbsp;fps; Minimal holds 72.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sidecar protocol</h2>
+    <p class="prose">JSON objects, one per line, over <code>127.0.0.1:47800</code>. The sidecar listens; the app connects (and reconnects) from a background thread and drains incoming messages between frames. On every connect the sidecar resends the welcome HUD text and spawns the desk props.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Direction</th><th>Message</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>app → sidecar</td><td><code>{"t":"talk","on":bool}</code></td><td>A/X pressed or released: start or stop recording.</td></tr>
+          <tr><td>app → sidecar</td><td><code>spawned</code> · <code>removed</code> · <code>cleared</code> · <code>nothing_to_undo</code></td><td>Results the sidecar turns into HUD messages.</td></tr>
+          <tr><td>app → sidecar</td><td><code>fixed</code> · <code>unfixed</code> · <code>nothing_to_fix</code></td><td>Fix-in-place results, with the prop name and its number of movable parts.</td></tr>
+          <tr><td>app → sidecar</td><td><code>browser_pick</code> · <code>browser_hover</code> · <code>browser_page</code> · <code>browser_toggle</code> · <code>browser_closed</code></td><td>Catalog interaction: tile picked or hovered, thumbstick flick, thumbstick click, ✕ button.</td></tr>
+          <tr><td>app → sidecar</td><td><code>hud_closed</code></td><td>The HUD's ✕; while downloading it cancels the download.</td></tr>
+          <tr><td>sidecar → app</td><td><code>{"t":"spawn", name, count, asset_ref, correction[16], body_paths, body_spheres, body_movable, bottom_z, size, position?}</code></td><td>Reference an asset's wrapper into the scene and register its rigid bodies.</td></tr>
+          <tr><td>sidecar → app</td><td><code>undo</code> · <code>clear</code> · <code>{"t":"fix","on":bool}</code></td><td>Voice commands the app carries out.</td></tr>
+          <tr><td>sidecar → app</td><td><code>browser</code> · <code>browser_loading</code> · <code>browser_close</code></td><td>A catalog page layer with its tile layout, the loading spinner, or close.</td></tr>
+          <tr><td>sidecar → app</td><td><code>{"t":"hud", kind, hold, points}</code></td><td>New HUD text as base64 float32 quad corners; the app writes them as one <code>points</code> array.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Adding an asset</h2>
+    <ol class="steps">
+      <li style="--c:var(--accent-3)"><span class="who">voice or catalog</span><p>“Add a ratchet” is parsed into a spawn command; picking a catalog tile sends <code>browser_pick</code>. “Show me balls” opens the catalog instead: the sidecar searches, downloads 256&nbsp;px thumbnails and writes a page layer.</p></li>
+      <li style="--c:var(--accent-2)"><span class="who">catalog.py · search + fetch</span><p>SimReady Central or the local index picks the package; the package files (no thumbnails or metadata) download with progress on the HUD, cancellable by voice or ✕.</p></li>
+      <li style="--c:var(--accent-2)"><span class="who">assets.describe_asset</span><p>Writes the wrapper layer: an up-axis and metres-per-unit correction, and overs that turn instancing off (ovphysx skips colliders inside instances). Reads the rigid bodies, a bounding sphere per body, which bodies are jointed parts (body1 of a non-fixed joint), the bottom height and the size.</p></li>
+      <li style="--c:var(--accent)"><span class="who">spawn message → Stage::addReference</span><p>The app builds a tiny layer <code>/World/Props/prop_NNNN</code> with the spawn pose times the correction, referencing the wrapper's <code>Asset</code> prim, and commits it at its own ordinal.</p></li>
+      <li style="--c:var(--accent)"><span class="who">Physics::sync(ordinal)</span><p>ovphysx drains that ordinal and creates the bodies, colliders and joints. The app interns the body paths and maps each to (prop, body) for picking.</p></li>
+      <li style="--c:var(--accent)"><span class="who">placement</span><p>Before anything spawns, a red marker follows the ray of one hand onto upward-facing scene surfaces (normal z &gt; 0.6). Its arrow shows the asset's facing and the thumbstick turns it. The trigger spawns the asset on that spot, standing on it via its <code>bottom_z</code>, and fixes it there as soon as physics reports its bodies. B or “undo” cancels. A batch stands in a row across the ray. Desk props (the NVIDIA mug) spawn exactly where they stood in the scene. At most 40 props; the oldest is removed first.</p></li>
+    </ol>
+    <p class="note"><span class="status">surfaces</span> The sidecar exports the environment colliders' convex hulls (<code>.cache/generated/placement_hulls.bin</code>: per hull, bounds and planes). The app casts the pointer ray against them with a slab test and then plane clipping, so it hits the same shapes PhysX collides with. Thumbstick while holding a fixed prop turns its anchors about the centre's vertical axis, keeping their height, so it stays standing on the floor.</p>
+  </section>
+
+  <section>
+    <h2>Interaction model</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Controls</h3>
+        <ul>
+          <li><b>Squeeze</b>: grab what is within 12&nbsp;cm of the hand; release to throw (hand velocity × 1.3).</li>
+          <li><b>Squeeze while pointing</b>: force-pull the pointed-at prop to the hand.</li>
+          <li><b>Trigger</b>: pointer ray for props and catalog tiles; while holding a prop, fix it or free it.</li>
+          <li><b>A / X</b>: push-to-talk. <b>B</b>: undo last spawn. <b>Y</b>: clear all.</li>
+          <li><b>Thumbstick click</b>: open or close the catalog. <b>Flick</b>: page it.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Velocity-driven holding</h3>
+        <p>Held bodies are never teleported. Each frame they get the velocity that reaches the hand target by the end of the frame's physics, so contacts stay physical (a held mug pushes others and is stopped by the desk), and the last velocity becomes the throw. One velocity per frame for all substeps; re-applying a one-step velocity before every step overshot and made held props jitter.</p>
+      </div>
+      <div class="card">
+        <h3>Jointed assets</h3>
+        <p>The first hand on a prop holds all its bodies rigidly, keeping their poses relative to the touched body. While it does, the other hand can take a movable part (a lid, a glasses arm) and drive it alone; the joint keeps it attached. Grabbing a non-movable part transfers the whole prop. Releasing either hand recaptures relative poses, with no throw.</p>
+      </div>
+      <div class="card">
+        <h3>Fix in place</h3>
+        <p>Trigger while holding a prop, or “fix it”, stores each body's pose as an anchor. Every frame the non-movable bodies are driven back to their anchors with the same velocity drive, so they stay put (a hit nudges them about 1&nbsp;mm and they return). Grabbing the base does nothing; jointed parts can be pulled with either hand. Trigger while holding it again, or “free it”, releases it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>HUD, catalog and scene details</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>HUD panel</h3>
+        <p>Real scene geometry at <code>/World/HUD/Panel</code>: a backing, a text mesh with a fixed set of quads, and coloured status bars. Pillow rasterizes the text into merged pixel rectangles; a message change is one <code>points</code> write at the frame's ordinal. The panel lazily follows the head, 35° to the left, clear of the catalog.</p>
+      </div>
+      <div class="card">
+        <h3>Catalog hover info</h3>
+        <p>When the pointer settles on a tile for 0.25&nbsp;s, the sidecar posts its size and download size, e.g. “11.4 × 9.0 × 8.0 cm · 4.2 MB download (30 files) · already downloaded”. Dimensions come from SimReady Central or are measured from a downloaded root USD.</p>
+      </div>
+      <div class="card">
+        <h3>Desk props and decals</h3>
+        <p>Scene objects listed in <code>config.desk_props</code> (the NVIDIA mug) are hidden in the environment and re-spawned as rigid bodies at their original position. Logo decals (OpenUSD on the laptop screen, NVIDIA wrapped around the mug) are alpha-cutout textured meshes authored by <code>scene.py</code>.</p>
+      </div>
+      <div class="card">
+        <h3>The Newton edition</h3>
+        <p><code>vrsim/app.py</code> is the earlier all-Python app: the same ovxr loop, controllers, voice and catalog, but with NVIDIA Newton for physics and the HUD in-process. The C++ edition and its sidecar replaced it for speed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Start-up</h2>
+    <div class="prose" style="display:flex;flex-direction:column;gap:10px">
+      <p><code>start_vr.bat</code> (Minimal) or <code>start_vr_rt2.bat</code> opens the sidecar in its own window, waits until port 47800 is listening (without connecting, since the sidecar takes the first connection as the app), then runs <code>vrsim_cpp.exe --render minimal|rt2</code>. The app waits until the headset session starts. Tokens for Wit.ai and Hugging Face are read from local files that git ignores.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Known limitations</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Limitation</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Articulated assets (e.g. the compressor) can't be grabbed per part</td><td>The app's rigid-body queries skip articulation links; their poses would need ARTICULATION_LINK reads.</td></tr>
+          <tr><td>No scene raycasts</td><td>ovphysx exposes no raycast or sweep API, so picking uses per-body bounding spheres and placement rays are cast against hull planes the sidecar exports. Props are not hulls, so nothing can be placed on top of another prop.</td></tr>
+          <tr><td>RT2 frame rate</td><td>Path tracing at Quest resolution costs about 10&nbsp;ms of bind plus GPU time; the runtime falls back to 36&nbsp;fps.</td></tr>
+          <tr><td>Fixed props are held by velocity, not made kinematic</td><td>Switching a body to kinematic at runtime isn't exposed; the velocity anchor is stiff but can be nudged slightly.</td></tr>
+          <tr><td>Minimal mode sky and shadows</td><td>The backdrop sky is generated; the RT2 dome sun doesn't line up exactly with the configured sun azimuth.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+</body>
+</html>

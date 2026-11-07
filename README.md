@@ -10,6 +10,25 @@ in front of you. Then **grab it and throw it**.
 | SimReady repos on Hugging Face | The asset catalog, downloaded on demand |
 | [Wit.ai](https://wit.ai) | Speech-to-intent. This is the service Meta's Voice SDK wraps (see "Why not the Unity Voice SDK") |
 
+The C++ app with ovphysx (PhysX) is the main version, and the all-Python app with Newton came first.
+These libraries are pre-release, so the versions in `pyproject.toml` are pinned on purpose.
+
+## Documentation
+
+- [How the parts interact](docs/architecture.html): technical description of the running system.
+  Download it and open it in a browser.
+- [Article draft](docs/medium-article.md): the libraries, SimReady, and the pitfalls along the way.
+- [Native app](cpp/README.md): build steps and the per-frame loop.
+
+## Agent skills
+
+Two Claude Code skills load automatically when you work in this repo:
+
+- [`build-ovxr-simready-demo`](.claude/skills/build-ovxr-simready-demo/SKILL.md) sets up this demo
+  or rebuilds it from scratch, milestone by milestone.
+- [`ovxr-vr-physics`](.claude/skills/ovxr-vr-physics/SKILL.md) holds the debugging rules: why prims
+  don't move, frame-rate limits, grabbing, voice and panels.
+
 ## Why not the Unity Voice SDK?
 
 ovxr and Newton are a C/Python stack that runs on the PC and streams to the Quest through the
@@ -160,18 +179,15 @@ tests/smoke_headless.py   catalog -> physics -> grab -> throw, no headset needed
 
 ## Verification status
 
+- ✅ **In the headset (Quest 3 over Link, C++ app):** stereo rendering, controllers, voice spawning,
+  smooth grabbing, the catalog panels, the Studierstube environment and the 72 fps Minimal mode.
 - ✅ Headless: `uv run python tests/smoke_headless.py mug football`. Assets settle on the table,
   a grabbed body tracks the hand to within 5 mm, and a throw lands about 3 m away.
-- ✅ The app starts the renderer, loads the environment, creates the ovxr context on the Oculus
-  OpenXR runtime, and handles spawn, undo and clear from console commands while waiting for a
-  headset.
 - ✅ HUD text: `uv run python tests/render_hud.py` renders two messages offscreen through
   ovstage `points` writes into ovrtx and checks that the text appears and changes.
 - ✅ Wit.ai with the real token: synthesized English speech ("Add three mugs", "Clear all
   objects", "Spawn a football", "Undo") is transcribed and parsed correctly with an untrained app.
-- ⏳ **Not yet run with a connected Quest:** the stereo render, controller actions
-  (`xrAttachSessionActionSets` on ovxr's session), and the panel's head-follow placement in the
-  headset (that math is unit-checked). If the action set fails to attach, the log names the call.
+- Developed and measured on one machine only (RTX 6000 Ada, Windows 11).
 
 ## Known limitations
 

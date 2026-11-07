@@ -76,7 +76,8 @@ shaders, which takes about 2 minutes, mostly while Quest Link is active.
 - ✅ The pipeline was validated offscreen with the same stack through the ovphysx Python
   bindings. A spawned SimReady football is picked up by `update_from_ovstage` and falls onto
   the table, and with the local+world+reset write it renders resting there.
-- ⏳ Not yet run in the headset: controllers, grab/throw and voice spawning.
+- ✅ Runs in the headset: controllers, grab and throw, voice spawning and panels. Minimal mode holds
+  71–72 fps with several scanned assets, and RT2 about 37 fps.
 
 `scripts/build_physx.bat` builds the raw PhysX 5 SDK from source. It isn't needed for this
 app, which uses ovphysx's bundled PhysX.
