@@ -1,0 +1,19 @@
+{
+  "format_version": "1.0",
+  "package_id": "simready.hf.nvidia.simready-assets.appliance_toaster_a01.2026.10.13_180535304265",
+  "license": "CC-BY-4.0",
+  "metadata": [
+    {
+      "name": "com.nvidia.simready.packaging.bom.json",
+      "hash": {
+        "sha256": "228b4ed96fd379d4dde552b9bafe0ea835632217d0a98ccccb2a87473df8b8b2"
+      }
+    }
+  ],
+  "content_hash": {
+    "sha256": "fa9f7b4463407ad3286dcd02d8475758a71452c3975bf5c454d0e412938df311"
+  },
+  "package_hash": {
+    "sha256": "b83b35392da7e329780254464921e6fcd472664dcb015f0f3a67e030ac6fa4e7"
+  }
+}

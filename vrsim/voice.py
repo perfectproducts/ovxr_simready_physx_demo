@@ -54,6 +54,7 @@ _GENERIC_QUERY = {"", "objects", "object", "things", "thing", "items", "item", "
                   "library", "the catalog", "the browser"}
 _BROWSER_CLOSE_RE = re.compile(r"\b(close|hide|exit|dismiss|remove)\b.*\b(catalog|catalogue|browser|menu|list|library)\b")
 _BROWSER_PAGE_RE = re.compile(r"^(?:go\s+)?(?:to\s+)?(?:the\s+)?(next|previous|prev|last|back)(?:\s+page)?$")
+_NEW_TOAST_RE = re.compile(r"\b(new|fresh|another|next)\s+(toast|slice|bread)\b|\breset\b.*\btoaster\b")
 _CLEAR_RE = re.compile(r"\b(clear|remove|delete|reset)\b.*\b(all|everything|scene|table)\b|^(clear|reset)$")
 _CANCEL_RE = re.compile(r"^(?:cancel|stop|abort)\b|\b(?:cancel|stop|abort)\b.*\b(?:download|downloading|loading)\b")
 _UNFIX_RE = re.compile(r"\b(unfix|unlock|unpin|unfreeze|release|free)\b")
@@ -63,7 +64,7 @@ _UNDO_RE = re.compile(r"\b(undo|remove (?:the )?last|delete (?:the )?last|take (
 
 @dataclass
 class Command:
-    kind: str  # spawn | clear | undo | fix | unfix | query ("" = everything) | browser_close | browser_page (count = +-1) | cancel (downloads)
+    kind: str  # spawn | clear | undo | fix | unfix | new_toast | query ("" = everything) | browser_close | browser_page (count = +-1) | cancel (downloads)
     query: str = ""
     count: int = 1
     text: str = ""
@@ -83,6 +84,8 @@ def parse_command(text: str, intents: list | None = None, entities: dict | None 
     text = re.sub(r"[^\w\s']", " ", (text or "").lower()).strip()
     text = re.sub(r"\s+", " ", text)
 
+    if _NEW_TOAST_RE.search(text):  # "new toast", "fresh toast", "reset the toaster"
+        return Command("new_toast", text=text)
     if _UNFIX_RE.search(text):  # "free it", "unlock the box": before Wit's intents, which don't know these
         return Command("unfix", text=text)
     if _FIX_RE.search(text):  # "fix it", "lock it in place"
