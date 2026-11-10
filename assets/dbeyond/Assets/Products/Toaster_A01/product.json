@@ -1,0 +1,30 @@
+{
+  "id": "Toaster_A01",
+  "name": "Smart toaster (demonstrator)",
+  "entry": "Toaster_A01.usda",
+  "source": {
+    "provider": "NVIDIA SimReady",
+    "asset": "appliance_toaster_a01",
+    "repository": "https://huggingface.co/datasets/nvidia/simready-assets",
+    "revision": "19512d4dd4b7c0868530efd3ec62277fa2dc1cde",
+    "license": "CC-BY-4.0",
+    "attribution": "NVIDIA SimReady assets, appliance_toaster_a01",
+    "folder": "simready/",
+    "validation_profile": "Robotics-Prop 3.1.0",
+    "modified": false
+  },
+  "layers": {
+    "toaster_ecu_overlay.usda": "heater glow, chamber state, display, joint state and latch drive attributes",
+    "toaster_fmi_binding.usda": "ovfmi USD-FMI binding (FmuInstance / FmuConnection / FmuMapping)"
+  },
+  "behaviour": {
+    "ecu": {"fmu": "../../../FMUs/ToasterECU/toaster_ctrl.fmu", "owner": "dbeyond / dSimula"},
+    "thermal": {"fmu": "../../../FMUs/ToasterThermal/toaster_thermal.fmu", "owner": "simulation team"}
+  },
+  "joints": {
+    "lever": {"prim": "Joints/joint_lever_joint_00", "type": "prismatic", "axis": "Z", "range_m": [-0.0595, -0.0005]},
+    "dial": {"prim": "Joints/joint_dial_joint_00", "type": "revolute", "axis": "X", "range_deg": null},
+    "cancel_button": {"prim": "Joints/joint_cancel_button_joint_00", "type": "prismatic", "axis": "X", "range_m": [-0.0032, -0.0002]},
+    "tray": {"prim": "Joints/joint_tray_joint_00", "type": "fixed"}
+  }
+}

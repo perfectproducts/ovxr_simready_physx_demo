@@ -15,6 +15,9 @@ one localhost TCP connection carrying JSON lines.
                     "position":[x,y,z] (optional: place the asset origin there, unrotated)}
                    {"t":"undo"}  {"t":"clear"}  {"t":"fix","on":true|false}  (a held / last touched prop)
                    {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
+  toaster (vrsim/toaster.py): spawned with "device":"toaster", then
+  app -> sidecar   {"t":"toaster_in","lever":m,"dial":deg,"cancel":m}
+  sidecar -> app   {"t":"toaster","lever_target":m,"toast":[x,y,z,rot],"toast_color":[r,g,b],"glow":..,...}
 
     uv run python -m vrsim.sidecar           (then start cpp\\build\\vrsim_cpp.exe)
 """
@@ -41,6 +44,7 @@ from .catalog import DownloadCancelled, SimReadyCatalog
 from .config import Config
 from .hud import Feedback, TextLayout, download_progress
 from .scene import write_desk_prop, write_environment, write_placement_hulls
+from .toaster import ToasterDevice, ToasterScenario
 from .voice import Command, VoiceListener, start_console
 
 log = logging.getLogger("vrsim.sidecar")
@@ -117,6 +121,19 @@ class Sidecar:
                 if built:
                     path, position = built
                     self.desk_props.append((name, describe_asset(path, config.generated_dir), position))
+        # The dbeyond smart toaster: spawned fixed on the desk on every connect, its FMUs run here.
+        self.toaster: ToasterScenario | None = None
+        self.toaster_info = None
+        self.toaster_device: ToasterDevice | None = None
+        if config.environment.usd is not None and config.environment.toaster.enabled:
+            try:
+                t = config.environment.toaster
+                self.toaster = ToasterScenario.load(t.position, t.yaw)
+                self.toaster_info = describe_asset(self.toaster.toaster_usd, config.generated_dir)
+                log.info("Toaster station: %s (%d FMUs)", self.toaster.toaster_usd.name, len(self.toaster.instances))
+            except Exception:
+                log.exception("Toaster station not available")
+                self.toaster = None
         self._infos = {}
         self._downloads: dict[str, threading.Event] = {}  # entry.key -> cancel flag, while downloading
         self._downloads_lock = threading.Lock()
@@ -147,11 +164,13 @@ class Sidecar:
             for name, info, position in self.desk_props:
                 self.link.send({"t": "spawn", "name": name, "count": 1, **self._spawn_payload(info),
                                 "position": list(position)})
+            self._start_toaster()
             self.feedback.post("info", "Hold A or X and speak",
                                "“add a mug” · “what balls are available?” · “undo” · “clear all”", hold=12.0)
             try:
                 self._read_loop(sock)
             finally:
+                self._stop_toaster()
                 self.link.attach(None)
                 sock.close()
                 log.info("App disconnected")
@@ -222,6 +241,11 @@ class Sidecar:
             self.commands.put(Command("cancel", text="✕"))
         elif kind == "browser_toggle":
             self.commands.put(Command("browser_close") if self.page else Command("query", ""))
+        elif kind == "toaster_in" and self.toaster_device:
+            self.toaster_device.set_inputs(msg.get("lever"), msg.get("dial"), msg.get("cancel"))
+        elif kind == "new_toast":
+            self._start_toaster(respawn=False)
+            self.feedback.post("ok", "Fresh toast", "a new slice and a cold toaster", hold=4.0)
         elif kind == "log":
             log.info("app: %s", msg.get("text"))
 
@@ -237,6 +261,8 @@ class Sidecar:
                     self._answer_query(command.query)
                 elif command.kind == "cancel":
                     self._cancel_downloads(command.text != "✕")
+                elif command.kind == "new_toast":
+                    self._on_app_message({"t": "new_toast"})
                 elif command.kind in ("undo", "clear"):
                     self.link.send({"t": command.kind})
                 elif command.kind in ("fix", "unfix"):
@@ -254,6 +280,22 @@ class Sidecar:
             except Exception as exc:
                 log.exception("Command failed")
                 self.feedback.post("error", "Something went wrong", str(exc))
+
+    def _start_toaster(self, respawn: bool = True) -> None:
+        """(Re)start the toaster's FMUs from their initial state; on connect also spawn it."""
+        if self.toaster is None:
+            return
+        self._stop_toaster()
+        if respawn:
+            self._quiet_spawns += 1
+            self.link.send({"t": "spawn", "name": "Smart toaster", "count": 1, **self._spawn_payload(self.toaster_info),
+                            "position": list(self.toaster.position), **self.toaster.spawn_extras()})
+        self.toaster_device = ToasterDevice(self.toaster, self.link.send, self.feedback)
+
+    def _stop_toaster(self) -> None:
+        device, self.toaster_device = self.toaster_device, None
+        if device:
+            device.stop()
 
     def _browser_anchor(self) -> list[float]:
         """Where the catalog first appears: centred over the table, just inside its far edge (x, y,

@@ -1,0 +1,18 @@
+{
+  "id": "Toast_Slice",
+  "name": "Toast slice",
+  "entry": "Toast_Slice.usda",
+  "source": {
+    "provider": "dbeyond demonstrator (procedural)",
+    "generator": "registry/make_toast.py",
+    "license": "same as the demonstrator"
+  },
+  "dimensions_m": {"width_x": 0.110, "height_z": 0.120, "thickness_y": 0.012},
+  "origin": "centre; slice plane XZ, stands upright in a slot running along X",
+  "material": {
+    "prim": "Looks/ToastMat/Surface",
+    "type": "UsdPreviewSurface",
+    "driven": "inputs:diffuseColor <- thermal FMU toast_r / toast_g / toast_b (ovfmi usdMapping (0,1) (1,1) (2,1))"
+  },
+  "usage": "Place it under the toaster prim; FMUs/ToastFlight drives xformOp:translate and rotateXYZ (in the slot, launched on the ECU eject pulse, landed). Kinematic rigid body in the scenario."
+}

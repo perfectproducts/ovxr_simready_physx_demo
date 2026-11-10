@@ -1,0 +1,609 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary SimReady_Metadata = {
+            dictionary Variants = {
+                dictionary Physics = {
+                    dictionary MuJoCo = {
+                        string activateOption = "Enabled"
+                        string prim = "/RootNode"
+                        string variantSetName = "MuJoCo"
+                    }
+                    dictionary Newton = {
+                        string activateOption = "Enabled"
+                        string prim = "/RootNode"
+                        string variantSetName = "Newton"
+                    }
+                    dictionary PhysX = {
+                        string activateOption = "Enabled"
+                        string prim = "/RootNode"
+                        string variantSetName = "PhysX"
+                    }
+                }
+            }
+            string asset_location = "simready_content\\common_assets\\props_appliance\\appliance_toaster_a01\\simready_physx_usd\\sm_appliance_toaster_a01_01.usd"
+            string asset_type = "prop"
+            string uuid = "d85a491f-7d81-4c21-bab8-d11a5b893e46"
+            dictionary validation = {
+                string profile = "Robotics-Prop"
+                string profile_version = "3.1.0"
+                dictionary validated_features = {
+                    dictionary "2026-03-02" = {
+                        dictionary FET000_CORE = {
+                            string dependencies = "[]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET001_BASE_NEUTRAL = {
+                            string dependencies = "[]"
+                            string "failing requirements" = "['AA.001']"
+                            bool passed = 0
+                            string version = "0.1.0"
+                        }
+                        dictionary FET003_BASE_NEUTRAL = {
+                            string dependencies = "[]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET003_BASE_PHYSX = {
+                            string dependencies = "[{'FET003_BASE_NEUTRAL': {'version': '0.1.0'}}]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET004_BASE_NEUTRAL = {
+                            string dependencies = "[{'FET003_BASE_NEUTRAL': {'version': '0.1.0'}}]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET004_BASE_PHYSX = {
+                            string dependencies = "[{'FET003_BASE_PHYSX': {'version': '0.1.0'}}, {'FET004_BASE_NEUTRAL': {'version': '0.1.0'}}]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET005_BASE_NEUTRAL = {
+                            string dependencies = "[]"
+                            bool passed = 1
+                            string version = "0.1.0"
+                        }
+                        dictionary FET006_BASE_MDL = {
+                            string dependencies = "[]"
+                            string "failing requirements" = "['VM.MDL.001']"
+                            bool passed = 0
+                            string version = "0.1.0"
+                        }
+                    }
+                }
+            }
+        }
+        string asset_dir = "simready_content/common_assets/props_appliance/appliance_toaster_a01"
+        string asset_name = "appliance_toaster_a01"
+        string asset_type = "prop"
+        string profile = "Prop-Robotics-Neutral"
+        string source_file = "../simready_usd/sm_appliance_toaster_a01_01.usd"
+        string usd_date_generated = "2026-03-02 15:18:36"
+        bool used_dsrs_exporter = 1
+    }
+    defaultPrim = "RootNode"
+    metersPerUnit = 1
+    subLayers = [
+        @./Physics/physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+def Xform "RootNode" (
+    prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode"]
+    assetInfo = {
+        asset identifier = @../sm_appliance_toaster_a01_01.usd@
+        string name = "sm_appliance_toaster_a01_01"
+    }
+    customData = {
+        dictionary Blender = {
+            bool generated = 1
+        }
+        dictionary omni = {
+            dictionary cip = {
+                string timestamp = "2026-03-02 15:20:23"
+                string type = "prop"
+                dictionary validator = {
+                    string[] rules = []
+                    string version = "1.1.6"
+                }
+            }
+        }
+    }
+    doc = "a black and blue toaster on a black background"
+    kind = "component"
+)
+{
+    custom string omni:simready:documentation = "toaster oven"
+    string semantic:wikidata_class:params:semanticData = "toaster"
+    string semantic:wikidata_class:params:semanticType = "wikidata_class"
+    string semantic:wikidata_qcode:params:semanticData = "Q14890"
+    string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+    token[] semantics:labels:wikidata_class = ["toaster"]
+    token[] semantics:labels:wikidata_qcode = ["Q14890"]
+
+    def Scope "Materials"
+    {
+    }
+
+    def Scope "Geometry"
+    {
+        def Xform "body_obj_01" (
+            prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string omni:simready:documentation = "a black and blue toaster on a black background"
+            custom double4 pxr:physics:principalAxes = (1, 0, 0, 0)
+            custom float3 pxr:usd:physics_centerofmass = (-0.006336277, -1.0491301e-9, 0.084908284)
+            custom double3 pxr:usd:physics_inertia = (0.006553868408288558, 0.00920229411408768, 0.008935705052608177)
+            custom double pxr:usd:physics_mass = 1.4565835651590442
+            custom string semantic:wikidata_class:params:query = "toaster"
+            string semantic:wikidata_class:params:semanticData = "wikidata_qcode"
+            string semantic:wikidata_class:params:semanticType = "wikidata_class"
+            string semantic:wikidata_qcode:params:semanticData = "Q14890"
+            string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+            token[] semantics:labels:wikidata_class = ["wikidata_qcode"]
+            token[] semantics:labels:wikidata_qcode = ["Q14890"]
+            float3 xformOp:rotateXYZ
+            float3 xformOp:scale
+            double3 xformOp:translate
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+            def Xform "body_mesh_01" (
+                active = true
+                prepend apiSchemas = ["MaterialBindingAPI"]
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/body_mesh_01>
+            )
+            {
+                custom rel material:binding:physics = </RootNode/PhysicsMaterials/physics_mat_m_opaque__plastic__toaster_v01_01>
+            }
+
+            def Xform "Grasp_Point_1_1"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0, -0, 89.99999)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-2.9802322387695312e-8, -0.12631726264953613, 0.08043554425239563)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "Grasp_Point_1_2"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0, -0, 89.99999)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (2.9802322387695312e-8, 0.12674933671951294, 0.08043554425239563)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "Grasp_Point_2_1"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0.000001961151, 89.99999, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.157426655292511, 1.9025510056280837e-8, 0.19741757214069366)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "Grasp_Point_2_2"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0.000001961151, 89.99999, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.15742671489715576, -1.5203035275135335e-8, 0.0988057404756546)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "Grasp_Point_3_1"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (-90, 89.99999, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.1472216099500656, -0.0006463485769927502, 0.09034213423728943)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "Grasp_Point_3_2"
+            {
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (-90, 89.99999, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.1472216695547104, -0.0006462889723479748, 0.0035505592823028564)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+            }
+
+            def Xform "grasp_identifier"
+            {
+                custom int intersection_face_index = 13057
+                custom float3 intersection_location = (-1.759664e-8, -0.07449496, 0.080435544)
+                custom float3 intersection_normal = (2.9648183e-8, -0.9986358, 0.052216113)
+                custom string intersection_object = "body_obj_01"
+                custom bool intersections_dirty = 1
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+                def BasisCurves "grasp_identifier_curve"
+                {
+                    int[] curveVertexCounts = [2]
+                    float3[] extent = [(-0.0050000297, -0.13131726, 0.07543554), (0.0050000297, 0.13174933, 0.08543555)]
+                    point3f[] points = [(-2.9802322e-8, -0.12631726, 0.080435544), (2.9802322e-8, 0.12674934, 0.080435544)]
+                    float[] primvars:tilt = [0, 0] (
+                        interpolation = "vertex"
+                    )
+                    uniform token purpose = "guide"
+                    uniform token type = "linear"
+                    float[] widths = [0.01, 0.01] (
+                        interpolation = "vertex"
+                    )
+                    uniform token wrap = "nonperiodic"
+                    float3 xformOp:rotateXYZ
+                    float3 xformOp:scale
+                    double3 xformOp:translate
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+                }
+            }
+        }
+
+        def Xform "lever_obj_01" (
+            prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode"]
+        )
+        {
+            custom string omni:simready:documentation = "a black and blue toaster on a black background"
+            custom double4 pxr:physics:principalAxes = (1, 0, 0, 0)
+            custom float3 pxr:usd:physics_centerofmass = (0.00480441, 6.8507457e-9, -0.0010992471)
+            custom double3 pxr:usd:physics_inertia = (0.0000015592269997033646, 0.000004301519409513, 0.000005393683635069501)
+            custom double pxr:usd:physics_mass = 0.010932241061268541
+            custom string semantic:wikidata_class:params:query = "toaster"
+            string semantic:wikidata_class:params:semanticData = "wikidata_qcode"
+            string semantic:wikidata_class:params:semanticType = "wikidata_class"
+            string semantic:wikidata_qcode:params:semanticData = "Q14890"
+            string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+            token[] semantics:labels:wikidata_class = ["wikidata_qcode"]
+            token[] semantics:labels:wikidata_qcode = ["Q14890"]
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.1489005982875824, 0.000022762083972338587, 0.1459999978542328)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+            def Xform "lever_mesh_01" (
+                active = true
+                prepend apiSchemas = ["MaterialBindingAPI"]
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/lever_mesh_01>
+            )
+            {
+                custom rel material:binding:physics = </RootNode/PhysicsMaterials/physics_mat_m_opaque__plastic__toaster_v01_01>
+            }
+
+            def Xform "grasp_identifier_001"
+            {
+                custom int intersection_face_index = 488
+                custom float3 intersection_location = (0.15742669, 3.1832315e-9, 0.15177852)
+                custom float3 intersection_normal = (0, 0, 1)
+                custom string intersection_object = "lever_obj_01"
+                custom bool intersections_dirty = 1
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.1489005982875824, -0.000022762083972338587, -0.1459999978542328)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+                def BasisCurves "grasp_identifier_curve_001"
+                {
+                    int[] curveVertexCounts = [2]
+                    float3[] extent = [(0.15242666, -0.0050000153, 0.09380574), (0.16242671, 0.005000019, 0.20241757)]
+                    point3f[] points = [(0.15742666, 1.902551e-8, 0.19741757), (0.15742671, -1.5203035e-8, 0.09880574)]
+                    float[] primvars:tilt = [0, 0] (
+                        interpolation = "vertex"
+                    )
+                    uniform token purpose = "guide"
+                    uniform token type = "linear"
+                    float[] widths = [0.01, 0.01] (
+                        interpolation = "vertex"
+                    )
+                    uniform token wrap = "nonperiodic"
+                    float3 xformOp:rotateXYZ
+                    float3 xformOp:scale
+                    double3 xformOp:translate
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+                }
+            }
+        }
+
+        def Xform "cancel_button_obj_01" (
+            prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode", "MaterialBindingAPI"]
+            instanceable = true
+            prepend references = @./instances.usda@</Instances/cancel_button_mesh_01>
+        )
+        {
+            custom rel material:binding:physics = </RootNode/PhysicsMaterials/physics_mat_m_opaque__plastic__toaster_v01_01>
+            custom string omni:simready:documentation = "a black and blue toaster on a black background"
+            custom double4 pxr:physics:principalAxes = (1, 0, 0, 0)
+            custom float3 pxr:usd:physics_centerofmass = (-4.0138065e-7, -1.3393583e-7, 0.0000057836005)
+            custom double3 pxr:usd:physics_inertia = (3.5770398244837557e-8, 2.8067761982264643e-8, 4.217151292087202e-8)
+            custom double pxr:usd:physics_mass = 0.0016234256522602664
+            custom string semantic:wikidata_class:params:query = "toaster"
+            string semantic:wikidata_class:params:semanticData = "wikidata_qcode"
+            string semantic:wikidata_class:params:semanticType = "wikidata_class"
+            string semantic:wikidata_qcode:params:semanticData = "Q14890"
+            string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+            token[] semantics:labels:wikidata_class = ["wikidata_qcode"]
+            token[] semantics:labels:wikidata_qcode = ["Q14890"]
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.1360000074, 0.03102318943, 0.04191678762)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def Xform "dial_obj_01" (
+            prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode"]
+        )
+        {
+            custom string omni:simready:documentation = "a black and blue toaster on a black background"
+            custom double4 pxr:physics:principalAxes = (1, 0, 0, 0)
+            custom float3 pxr:usd:physics_centerofmass = (0.009251509, -0.0014588312, -0.00015861957)
+            custom double3 pxr:usd:physics_inertia = (0.000001160954869731577, 0.0000014407890566277, 0.0000014622714641578965)
+            custom double pxr:usd:physics_mass = 0.007501517485329714
+            custom string semantic:wikidata_class:params:query = "toaster"
+            string semantic:wikidata_class:params:semanticData = "wikidata_qcode"
+            string semantic:wikidata_class:params:semanticType = "wikidata_class"
+            string semantic:wikidata_qcode:params:semanticData = "Q14890"
+            string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+            token[] semantics:labels:wikidata_class = ["wikidata_qcode"]
+            token[] semantics:labels:wikidata_qcode = ["Q14890"]
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.13801100850105286, 0.000030813658668193966, 0.04817032814025879)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+            def Xform "dial_mesh_01" (
+                active = true
+                prepend apiSchemas = ["MaterialBindingAPI"]
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/dial_mesh_01>
+            )
+            {
+                custom rel material:binding:physics = </RootNode/PhysicsMaterials/physics_mat_m_opaque__plastic__toaster_v01_01>
+            }
+
+            def Xform "grasp_identifier_002"
+            {
+                custom int intersection_face_index = 112
+                custom float3 intersection_location = (0.14722164, -0.0006463234, 0.053636014)
+                custom float3 intersection_normal = (-7.0875757e-7, -0.19433007, 0.9809362)
+                custom string intersection_object = "dial_obj_01"
+                custom bool intersections_dirty = 1
+                uniform token purpose = "guide"
+                token visibility = "invisible"
+                float3 xformOp:rotateXYZ = (0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.13801100850105286, -0.000030813658668193966, -0.04817032814025879)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+
+                def BasisCurves "grasp_identifier_curve_002"
+                {
+                    int[] curveVertexCounts = [2]
+                    float3[] extent = [(0.14222161, -0.0056463485, -0.0014494406), (0.15222166, 0.004353711, 0.09534214)]
+                    point3f[] points = [(0.14722161, -0.0006463486, 0.090342134), (0.14722167, -0.000646289, 0.0035505593)]
+                    float[] primvars:tilt = [0, 0] (
+                        interpolation = "vertex"
+                    )
+                    uniform token purpose = "guide"
+                    uniform token type = "linear"
+                    float[] widths = [0.01, 0.01] (
+                        interpolation = "vertex"
+                    )
+                    uniform token wrap = "nonperiodic"
+                    float3 xformOp:rotateXYZ
+                    float3 xformOp:scale
+                    double3 xformOp:translate
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+                }
+            }
+        }
+
+        def Xform "tray_obj_01" (
+            prepend apiSchemas = ["SemanticsLabelsAPI:wikidata_class", "SemanticsAPI:wikidata_class", "SemanticsLabelsAPI:wikidata_qcode", "SemanticsAPI:wikidata_qcode", "MaterialBindingAPI"]
+            instanceable = true
+            prepend references = @./instances.usda@</Instances/tray_mesh_01>
+        )
+        {
+            custom bool _renamed = 1
+            custom rel material:binding:physics = </RootNode/PhysicsMaterials/physics_mat_m_opaque__metal__toaster_v01_01>
+            custom double4 pxr:physics:principalAxes = (1, 0, 0, 0)
+            custom float3 pxr:usd:physics_centerofmass = (-0.104036964, 0.00009578245, -0.008499495)
+            custom double3 pxr:usd:physics_inertia = (0.00000816259149797754, 0.00003754854798943102, 0.00004548615582383008)
+            custom double pxr:usd:physics_mass = 0.015135476930415594
+            custom int selection_order = 0
+            custom string semantic:wikidata_class:params:query = "toaster"
+            string semantic:wikidata_class:params:semanticData = "wikidata_qcode"
+            string semantic:wikidata_class:params:semanticType = "wikidata_class"
+            string semantic:wikidata_qcode:params:semanticData = "Q14890"
+            string semantic:wikidata_qcode:params:semanticType = "wikidata_qcode"
+            token[] semantics:labels:wikidata_class = ["wikidata_qcode"]
+            token[] semantics:labels:wikidata_qcode = ["Q14890"]
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.1050056815, -0.00007303070743, 0.1470940113)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+    }
+
+    def Scope "ReferencePrims"
+    {
+        def Xform "body_joint_00" (
+            prepend apiSchemas = ["CollectionAPI:body_joint_00"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string _renamed_as = "body_joint_00"
+            rel collection:body_joint_00:includes = </RootNode/Geometry/body_obj_01>
+        }
+
+        def Xform "tray_joint_00" (
+            prepend apiSchemas = ["CollectionAPI:tray_joint_00"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string _renamed_as = "tray_joint_00"
+            rel collection:tray_joint_00:includes = </RootNode/Geometry/tray_obj_01>
+            custom double drive:angular:physics:damping = 0.10000000149011612
+            custom double drive:angular:physics:maxForce = 1000000
+            custom double drive:angular:physics:stiffness = 0
+            custom double drive:angular:physics:targetPosition = 0
+            custom double drive:angular:physics:targetVelocity = 0.3499999940395355
+            custom string drive:angular:physics:type = "force"
+            custom double drive:linear:physics:damping = 0.10000000149011612
+            custom double drive:linear:physics:maxForce = 1000000
+            custom double drive:linear:physics:stiffness = 0
+            custom double drive:linear:physics:targetPosition = 0
+            custom double drive:linear:physics:targetVelocity = 0.3499999940395355
+            custom string drive:linear:physics:type = "force"
+            custom double pxr:usd:physics:breakForce = inf
+            custom double pxr:usd:physics:breakTorque = inf
+            custom string pxr:usd:physics:joint:body0 = "body_obj_01"
+            custom string pxr:usd:physics:joint:body1 = "tray_obj_01"
+            custom string pxr:usd:physics:joint:type = "fixed"
+            custom double3 pxr:usd:physics:localPos0 = (0.10500568151473999, -0.00007303070742636919, 0.1470940113067627)
+            custom double3 pxr:usd:physics:localPos1 = (0, 0, 0)
+            custom double4 pxr:usd:physics:localRot0 = (1, 0, 0, 0)
+            custom double4 pxr:usd:physics:localRot1 = (1, 0, 0, 0)
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.10500568151473999, -0.00007303070742636919, 0.1470940113067627)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+        }
+
+        def Xform "dial_joint_00" (
+            prepend apiSchemas = ["CollectionAPI:dial_joint_00"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string _renamed_as = "dial_joint_00"
+            rel collection:dial_joint_00:includes = </RootNode/Geometry/dial_obj_01>
+            custom double drive:angular:physics:damping = 0.10000000149011612
+            custom double drive:angular:physics:maxForce = 1000000
+            custom double drive:angular:physics:stiffness = 0
+            custom double drive:angular:physics:targetPosition = 0
+            custom double drive:angular:physics:targetVelocity = 0.3499999940395355
+            custom string drive:angular:physics:type = "force"
+            custom double drive:linear:physics:damping = 0.10000000149011612
+            custom double drive:linear:physics:maxForce = 1000000
+            custom double drive:linear:physics:stiffness = 0
+            custom double drive:linear:physics:targetPosition = 0
+            custom double drive:linear:physics:targetVelocity = 0.3499999940395355
+            custom string drive:linear:physics:type = "force"
+            custom double pxr:usd:physics:breakForce = inf
+            custom double pxr:usd:physics:breakTorque = inf
+            custom string pxr:usd:physics:joint:axis = "X"
+            custom string pxr:usd:physics:joint:body0 = "body_obj_01"
+            custom string pxr:usd:physics:joint:body1 = "dial_obj_01"
+            custom string pxr:usd:physics:joint:lowerLimit = "-inf"
+            custom string pxr:usd:physics:joint:type = "revolute"
+            custom string pxr:usd:physics:joint:upperLimit = "inf"
+            custom double3 pxr:usd:physics:localPos0 = (0.13801100850105286, 0.000030813658668193966, 0.04817032814025879)
+            custom double3 pxr:usd:physics:localPos1 = (0, 0, 0)
+            custom double4 pxr:usd:physics:localRot0 = (1, 0, 0, 0)
+            custom double4 pxr:usd:physics:localRot1 = (1, 0, 0, 0)
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.13801100850105286, 0.000030813658668193966, 0.04817032814025879)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+        }
+
+        def Xform "cancel_button_joint_00" (
+            prepend apiSchemas = ["CollectionAPI:cancel_button_joint_00"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string _renamed_as = "cancel_button_joint_00"
+            rel collection:cancel_button_joint_00:includes = </RootNode/Geometry/cancel_button_obj_01>
+            custom double drive:linear:physics:damping = 0.10000000149011612
+            custom double drive:linear:physics:maxForce = 1000000
+            custom double drive:linear:physics:stiffness = 0.30000001192092896
+            custom double drive:linear:physics:targetPosition = 0.13600000739097595
+            custom double drive:linear:physics:targetVelocity = 0.3499999940395355
+            custom string drive:linear:physics:type = "force"
+            custom double pxr:usd:physics:breakForce = inf
+            custom double pxr:usd:physics:breakTorque = inf
+            custom string pxr:usd:physics:joint:axis = "X"
+            custom string pxr:usd:physics:joint:body0 = "body_obj_01"
+            custom string pxr:usd:physics:joint:body1 = "cancel_button_obj_01"
+            custom double pxr:usd:physics:joint:lowerLimit = -0.003214240074157715
+            custom string pxr:usd:physics:joint:type = "prismatic"
+            custom double pxr:usd:physics:joint:upperLimit = -0.00021423399448394775
+            custom double3 pxr:usd:physics:localPos0 = (0.1362142413854599, 0.031023189425468445, 0.04191678762435913)
+            custom double3 pxr:usd:physics:localPos1 = (0, 0, 0)
+            custom double4 pxr:usd:physics:localRot0 = (1, 0, 0, 0)
+            custom double4 pxr:usd:physics:localRot1 = (1, 0, 0, 0)
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.13600000739097595, 0.031023189425468445, 0.04191678762435913)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+        }
+
+        def Xform "lever_joint_00" (
+            prepend apiSchemas = ["CollectionAPI:lever_joint_00"]
+        )
+        {
+            custom bool _renamed = 1
+            custom string _renamed_as = "lever_joint_00"
+            rel collection:lever_joint_00:includes = </RootNode/Geometry/lever_obj_01>
+            custom double drive:linear:physics:damping = 0.10000000149011612
+            custom double drive:linear:physics:maxForce = 1000000
+            custom double drive:linear:physics:stiffness = 0.800000011920929
+            custom double drive:linear:physics:targetPosition = 0.1459999978542328
+            custom double drive:linear:physics:targetVelocity = 0.3499999940395355
+            custom string drive:linear:physics:type = "force"
+            custom double pxr:usd:physics:breakForce = inf
+            custom double pxr:usd:physics:breakTorque = inf
+            custom string pxr:usd:physics:joint:axis = "Z"
+            custom string pxr:usd:physics:joint:body0 = "body_obj_01"
+            custom string pxr:usd:physics:joint:body1 = "lever_obj_01"
+            custom double pxr:usd:physics:joint:lowerLimit = -0.05949397385120392
+            custom string pxr:usd:physics:joint:type = "prismatic"
+            custom double pxr:usd:physics:joint:upperLimit = -0.0004939734935760498
+            custom double3 pxr:usd:physics:localPos0 = (0.1489005982875824, 0.000022762083972338587, 0.14649397134780884)
+            custom double3 pxr:usd:physics:localPos1 = (0, 0, 0)
+            custom double4 pxr:usd:physics:localRot0 = (1, 0, 0, 0)
+            custom double4 pxr:usd:physics:localRot1 = (1, 0, 0, 0)
+            float3 xformOp:rotateXYZ = (0, 0, 0)
+            float3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0.1489005982875824, 0.000022762083972338587, 0.1459999978542328)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]
+        }
+    }
+
+    def Scope "Grasp"
+    {
+    }
+
+    def Scope "PhysicsMaterials"
+    {
+        def Material "physics_mat_m_opaque__plastic__toaster_v01_01"
+        {
+        }
+
+        def Material "physics_mat_m_opaque__metal__toaster_v01_01"
+        {
+        }
+    }
+
+    def Scope "Joints"
+    {
+    }
+
+    def Scope "VisualMaterials"
+    {
+    }
+}
+

@@ -91,6 +91,20 @@ def _studierstube_decals() -> tuple[Decal, ...]:
 
 
 @dataclass
+class ToasterConfig:
+    """The dbeyond smart toaster (assets/dbeyond) on the Studierstube desk, run by its FMUs.
+
+    It stands at the desk's front left, in front of the books, lever and dial facing the user
+    (toaster +X points toward -Y). The toast flies along toaster +Y and lands flat about 0.5 m
+    further, on the free desk in front of the laptop; the yaw is a few degrees past -90 so it
+    clears the laptop base. VRSIM_TOASTER=none leaves it out."""
+
+    enabled: bool = field(default_factory=lambda: os.environ.get("VRSIM_TOASTER", "").strip().lower() not in ("none", "0", "off"))
+    position: tuple[float, float, float] = (-0.62, 0.64, 0.783)  # toaster origin (bottom centre) [m]
+    yaw: float = -97.0  # [deg] about +Z
+
+
+@dataclass
 class EnvironmentConfig:
     """An authored scene (Z-up, metres) replacing the generated floor and table.
 
@@ -115,6 +129,7 @@ class EnvironmentConfig:
     desk_props: dict[str, tuple[str, ...]] = field(
         default_factory=lambda: {"NVIDIA mug": ("Ceramic_mug", "Torus", "Coffee")})
     desk_prop_mass: float = 0.35  # [kg]
+    toaster: ToasterConfig = field(default_factory=ToasterConfig)
     # Meshes (paths below the scene's root) given a plain material of this linear colour: the mug
     # and its handle (Torus) go black so the NVIDIA logo reads on it.
     prim_colors: dict[str, tuple[float, float, float]] = field(

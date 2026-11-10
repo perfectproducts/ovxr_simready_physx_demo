@@ -44,6 +44,9 @@ constexpr int kMaxProps = 40;
 constexpr double kGrabOn = 0.55, kGrabOff = 0.35, kGrabReach = 0.12, kRayMax = 8.0;
 constexpr double kMaxLinear = 12.0, kMaxAngular = 30.0, kThrowScale = 1.3;
 constexpr double kTurnRate = 1.6;  // [rad/s] thumbstick turning of a placement or a held fixed prop
+constexpr double kPartReach = 0.025;  // [m] grip within this of a jointed part takes the part, not its prop
+constexpr double kPokeReach = 0.06;  // [m] controller to the toaster's cancel button for a trigger press
+constexpr double kGlowEmission = 6.0;  // slot strip emissiveColor at full heater glow (Minimal rendering)
 constexpr double kDeskPropMax = 0.35;  // [m] largest side of a prop that spawns on the desk
 constexpr size_t kHudFloats = 6000 * 4 * 3;  // vrsim.hud.MAX_QUADS quads x 4 corners x xyz
 const char* kHands[2] = { "/World/Hands/Left", "/World/Hands/Right" };
@@ -152,6 +155,39 @@ struct Prop
     std::vector<Pose> anchor;
     bool fixOnSpawn = false;  // placed at the marker: anchor it once physics reports its bodies
     double radius = 0.1, scale = 1.0;
+    std::string device;  // "toaster": a prop driven by FMUs in the sidecar (vrsim/toaster.py); kept by undo/clear
+};
+
+// One operated joint of a device prop, measured from body poses (vrsim.toaster.joint_frames):
+// linear = (part position in the base body's frame - origin) . axis, angular = turn about axis.
+struct DeviceJoint
+{
+    int body = -1;  // index into the prop's bodies
+    Vec3 origin, axis{ 1, 0, 0 };
+    bool linear = true;
+    double offset = 0, lower = -1e9, upper = 1e9;
+    double turns = 0, lastAngle = 0;  // angular: unwrapped reading [deg]
+    bool seen = false;
+    double value = 0;  // last reading in joint units (m or deg)
+    double hold = 0;   // angular: held here while no hand turns it (the dial's friction)
+};
+
+// The dbeyond smart toaster: the app measures lever, dial and cancel button and applies the FMU
+// outputs the sidecar sends back (latch, toast pose and colour, heater glow).
+struct Toaster
+{
+    int prop = -1;
+    int base = -1;  // the housing body: the toaster frame
+    DeviceJoint lever, dial, cancel;
+    std::string toast, toastMaterial, glowLight, glowShader;
+    double glowMax = 30000, latchedBelow = -0.03;
+    double leverTarget = -0.0005;
+    std::array<double, 4> toastLocal{ 0, -0.026, 0.17, 0 };  // x, y, z [m], tumble about X [deg]
+    std::array<float, 3> toastColor{ 0.93f, 0.85f, 0.68f };
+    float glow = 0;
+    bool colorDirty = true, glowDirty = true;
+    double cancelPressUntil = -1;  // trigger poke on the cancel button: held in until then [s]
+    double lastSent = -1;
 };
 
 // One rigid body of a prop. Jointed assets have several.
@@ -354,11 +390,23 @@ public:
                 driveGrabs(input, steps * kPhysicsDt);
                 lap(m_prof.drive);
                 for (int i = 0; i < steps; ++i)
+                {
+                    // The toaster's latch and dial hold fight springs and gravity on light parts:
+                    // re-aim them before every step from fresh poses. Once per frame with 1-3
+                    // steps, the latched lever jumped over a 13 mm range (the toast rides on it).
+                    if (i > 0 && m_toaster)
+                    {
+                        m_physics->readBodies();
+                        readToasterJoints();
+                        driveToaster(kPhysicsDt);
+                    }
                     m_physics->step(static_cast<float>(kPhysicsDt));
+                }
                 lap(m_prof.step);
                 m_prof.steps += steps;
             }
             m_physics->readBodies();
+            measureToaster(seconds(m_start, now));
             lap(m_prof.read);
 
             const ovstage_ordinal_t ordinal = m_stage->current();
@@ -447,8 +495,10 @@ private:
 
     std::optional<BodyRef> pickNear(const Vec3& point) const
     {
-        std::optional<BodyRef> best;
-        double bestGap = kGrabReach;
+        // A jointed part the hand is at wins over its prop's body, whose bounding sphere usually
+        // contains it (the toaster housing's 18 cm sphere swallows the dial and the lever).
+        std::optional<BodyRef> best, bestPart;
+        double bestGap = kGrabReach, bestPartGap = kPartReach;
         for (const BodyState& b : m_physics->bodies())
         {
             const auto it = m_bodyProp.find(b.path);
@@ -458,8 +508,12 @@ private:
             const double gap = (center - point).length() - radius;
             if (gap <= bestGap)
                 bestGap = gap, best = it->second;
+            const Prop& prop = m_props[it->second.prop];
+            const bool movable = it->second.body < static_cast<int>(prop.movable.size()) && prop.movable[it->second.body];
+            if (movable && gap <= bestPartGap)
+                bestPartGap = gap, bestPart = it->second;
         }
-        return best;
+        return bestPart ? bestPart : best;
     }
 
     const BodyState* bodyState(int prop, int body) const
@@ -502,6 +556,8 @@ private:
             hand.grip = hi.grip;
             if (hand.triggerClicked && hand.prop >= 0 && hand.whole)
                 setFixed(hand.prop, m_props[hand.prop].anchor.empty());
+            else if (hand.triggerClicked && hand.prop < 0 && !m_pendingSpawn)
+                pokeToaster(h, hi);
 
             hand.rayLength = 0;
             if (hand.prop < 0 && hi.aimValid && hi.trigger > 0.1f)
@@ -559,7 +615,11 @@ private:
         Hand& other = m_hands[1 - h];
         if (hand.prop >= 0 && !m_props[hand.prop].anchor.empty())
         {
-            // Fixed: the anchor keeps holding it; a released part swings on as it was moving.
+            // Fixed: the anchor keeps holding it; a released part swings on as it was moving,
+            // except on the toaster, whose dial has no friction and would spin on.
+            const BodyState* s = !hand.whole && !m_props[hand.prop].device.empty() ? bodyState(hand.prop, hand.body) : nullptr;
+            if (s)
+                m_physics->setBodyVelocities(m_props[hand.prop].root, { s->path }, { Vec3{} }, { Vec3{} });
         }
         else if (hand.prop >= 0 && other.prop == hand.prop)
         {
@@ -844,6 +904,7 @@ private:
     void driveGrabs(const InputFrame& in, double horizon)
     {
         driveAnchors(horizon);
+        driveToaster(kPhysicsDt);  // one step ahead, re-aimed per step; a hand on a part overrides it
         for (int h = 0; h < 2; ++h)
         {
             Hand& hand = m_hands[h];
@@ -884,6 +945,236 @@ private:
         }
     }
 
+    // --- smart toaster (vrsim/toaster.py runs its FMUs) -------------------------------------------
+    int bodyIndex(const Prop& prop, const std::string& rel) const
+    {
+        const std::string path = prop.root + "/" + rel;
+        for (size_t b = 0; b < prop.bodyPaths.size(); ++b)
+            if (prop.bodyPaths[b] == path)
+                return static_cast<int>(b);
+        return -1;
+    }
+
+    void setupToaster(int index, const nlohmann::json& msg)
+    {
+        const Prop& prop = m_props[index];
+        Toaster t;
+        t.prop = index;
+        t.base = bodyIndex(prop, msg.value("base", std::string("Asset/Geometry/body_obj_01")));
+        const auto joints = msg.value("joints", nlohmann::json::object());
+        auto joint = [&](const char* role, DeviceJoint& j) {
+            if (!joints.contains(role))
+                return;
+            const auto& f = joints[role];
+            j.body = bodyIndex(prop, f.value("body", std::string()));
+            const auto o = f.value("origin", std::vector<double>{ 0, 0, 0 });
+            const auto a = f.value("axis", std::vector<double>{ 1, 0, 0 });
+            j.origin = { o[0], o[1], o[2] };
+            j.axis = Vec3{ a[0], a[1], a[2] }.normalized();
+            j.linear = f.value("kind", std::string("linear")) == "linear";
+            j.offset = f.value("offset", 0.0);
+            if (f.contains("lower") && f["lower"].is_number())
+                j.lower = f["lower"];
+            if (f.contains("upper") && f["upper"].is_number())
+                j.upper = f["upper"];
+        };
+        joint("lever", t.lever);
+        joint("dial", t.dial);
+        joint("cancel", t.cancel);
+        t.toast = prop.root + "/" + msg.value("toast", std::string("Asset/Toast"));
+        t.toastMaterial = prop.root + "/" + msg.value("toast_material", std::string("Asset/Toast/Looks/ToastMat/Surface"));
+        t.glowLight = prop.root + "/" + msg.value("glow_light", std::string("Asset/ToasterECU/HeaterGlow"));
+        t.glowShader = prop.root + "/" + msg.value("glow_shader", std::string("Asset/ToasterECU/SlotGlow/Glow/Shader"));
+        t.glowMax = msg.value("glow_max", 30000.0);
+        t.latchedBelow = msg.value("lever_latched_below", -0.03);
+        if (t.base < 0 || t.lever.body < 0)
+        {
+            logf("Toaster: base or lever body not found; it stays a plain prop");
+            return;
+        }
+        m_toaster = t;
+        logf("Toaster ready: lever body %d, dial %d, cancel %d", t.lever.body, t.dial.body, t.cancel.body);
+    }
+
+    // A part's pose in the toaster frame (the housing body).
+    std::optional<Pose> toasterRel(const DeviceJoint& j) const
+    {
+        const BodyState* base = bodyState(m_toaster->prop, m_toaster->base);
+        const BodyState* part = j.body >= 0 ? bodyState(m_toaster->prop, j.body) : nullptr;
+        if (!base || !part)
+            return std::nullopt;
+        return base->pose.inverse() * part->pose;
+    }
+
+    void readJoint(DeviceJoint& j)
+    {
+        const auto rel = toasterRel(j);
+        if (!rel)
+            return;
+        if (j.linear)
+            j.value = std::clamp((rel->p - j.origin).dot(j.axis) + j.offset, j.lower - 1e-4, j.upper + 1e-4);
+        else
+        {
+            const Quat& q = rel->q;
+            double angle = 2.0 * std::atan2(Vec3{ q.x, q.y, q.z }.dot(j.axis), q.w) * 180.0 / 3.14159265358979;
+            angle = std::remainder(angle, 360.0);
+            if (j.seen)
+                j.turns += std::remainder(angle - j.lastAngle, 360.0);
+            else
+                j.turns = angle;
+            j.lastAngle = angle;
+            j.value = j.turns + j.offset;
+            if (!j.seen)
+                j.hold = j.value;
+        }
+        j.seen = true;
+    }
+
+    void readToasterJoints()
+    {
+        readJoint(m_toaster->lever);
+        readJoint(m_toaster->dial);
+        readJoint(m_toaster->cancel);
+    }
+
+    // Joint readings to the sidecar's FMUs, up to 60 times a second.
+    void measureToaster(double t)
+    {
+        if (!m_toaster)
+            return;
+        Toaster& ts = *m_toaster;
+        readToasterJoints();
+        double cancel = ts.cancel.value;
+        if (t < ts.cancelPressUntil)  // poked: count it as pressed even if physics lags the 3 mm
+            cancel = std::min(cancel, ts.cancel.lower + 0.0003);
+        if (t - ts.lastSent < 1.0 / 60.0 || !ts.lever.seen)
+            return;
+        ts.lastSent = t;
+        m_link.send({ { "t", "toaster_in" }, { "lever", ts.lever.value }, { "dial", ts.dial.value }, { "cancel", cancel } });
+    }
+
+    bool handHolds(int prop, int body) const
+    {
+        for (const Hand& h : m_hands)
+            if (h.prop == prop && h.body == body && !h.whole)
+                return true;
+        return false;
+    }
+
+    // Velocity that brings a joint to `target` (joint units: m, or deg) over the horizon.
+    void driveJoint(const DeviceJoint& j, double target, double horizon)
+    {
+        const BodyState* base = bodyState(m_toaster->prop, m_toaster->base);
+        const BodyState* part = j.body >= 0 ? bodyState(m_toaster->prop, j.body) : nullptr;
+        if (!base || !part)
+            return;
+        const double gap = target - j.value;
+        const Vec3 along = base->pose.q.rotate(j.axis);
+        const Vec3 v = j.linear ? along * std::clamp(gap / horizon, -0.4, 0.4) : Vec3{};
+        const Vec3 w = j.linear ? Vec3{} : along * std::clamp(gap * 3.14159265358979 / 180.0 / horizon, -8.0, 8.0);
+        m_physics->setBodyVelocities(m_props[m_toaster->prop].root, { part->path }, { v }, { w });
+    }
+
+    // The ECU's latch holds the carriage down (its drive target in the binding, here a velocity
+    // drive against the lever spring); a poke on the cancel button pushes it in for a moment.
+    void driveToaster(double horizon)
+    {
+        if (!m_toaster)
+            return;
+        const Toaster& ts = *m_toaster;
+        const double t = seconds(m_start, Clock::now());
+        if (ts.leverTarget < ts.latchedBelow && !handHolds(ts.prop, ts.lever.body) && ts.lever.seen)
+            driveJoint(ts.lever, std::max(ts.leverTarget, ts.lever.lower + 0.0002), horizon);
+        if (t < ts.cancelPressUntil && ts.cancel.body >= 0 && !handHolds(ts.prop, ts.cancel.body))
+            driveJoint(ts.cancel, ts.cancel.lower + 0.0001, horizon);
+        // The dial has no friction and its weight is off the axle: hold it where the hand left it.
+        if (ts.dial.body >= 0 && ts.dial.seen)
+        {
+            if (handHolds(ts.prop, ts.dial.body))
+                m_toaster->dial.hold = ts.dial.value;
+            else
+                driveJoint(ts.dial, ts.dial.hold, horizon);
+        }
+    }
+
+    // Trigger with the controller at the cancel button (not holding anything): press it. It is
+    // 3 mm of travel, too little to push reliably by grabbing it.
+    void pokeToaster(int h, const HandInput& hi)
+    {
+        if (!m_toaster || m_toaster->cancel.body < 0)
+            return;
+        const BodyState* button = bodyState(m_toaster->prop, m_toaster->cancel.body);
+        if (!button || (button->pose.p - hi.grip.p).length() > kPokeReach)
+            return;
+        m_toaster->cancelPressUntil = seconds(m_start, Clock::now()) + 0.4;
+        m_xr->haptic(h, 0.7f, 0.05f);
+    }
+
+    void onToaster(const nlohmann::json& msg)
+    {
+        if (!m_toaster)
+            return;
+        Toaster& ts = *m_toaster;
+        const double before = ts.leverTarget;
+        ts.leverTarget = msg.value("lever_target", ts.leverTarget);
+        if (const auto v = msg.value("toast", std::vector<double>{}); v.size() == 4)
+            std::copy(v.begin(), v.end(), ts.toastLocal.begin());
+        if (const auto c = msg.value("toast_color", std::vector<float>{}); c.size() == 3)
+        {
+            std::array<float, 3> color{ c[0], c[1], c[2] };
+            ts.colorDirty = ts.colorDirty || color != ts.toastColor;
+            ts.toastColor = color;
+        }
+        const float glow = msg.value("glow", 0.0f);
+        ts.glowDirty = ts.glowDirty || std::abs(glow - ts.glow) > 1.0f;
+        ts.glow = glow;
+        const bool latched = ts.leverTarget < ts.latchedBelow, wasLatched = before < ts.latchedBelow;
+        if (m_xr && latched != wasLatched)  // click: the latch catches, or lets go with the ding
+            for (int h = 0; h < 2; ++h)
+                if (m_hands[h].prop == ts.prop || !latched)
+                    m_xr->haptic(h, latched ? 0.5f : 0.9f, latched ? 0.03f : 0.12f);
+    }
+
+    void toasterTransforms(std::vector<std::string>& prims, std::vector<Mat16>& matrices) const
+    {
+        if (!m_toaster)
+            return;
+        const Toaster& ts = *m_toaster;
+        const BodyState* base = bodyState(ts.prop, ts.base);
+        if (!base)
+            return;
+        const auto& l = ts.toastLocal;
+        const Pose toast{ { l[0], l[1], l[2] }, Quat::axisAngle({ 1, 0, 0 }, l[3] * 3.14159265358979 / 180.0) };
+        prims.push_back(ts.toast);
+        matrices.push_back((base->pose * toast).matrix());
+        // The glow strips and the heater light sit outside the physics bodies: keep them with the
+        // housing when the fixed toaster is turned. HeaterGlow: (0, 0, 0.16), turned over about X.
+        prims.push_back(ts.glowShader.substr(0, ts.glowShader.rfind("/Glow/")));
+        matrices.push_back(base->pose.matrix());
+        prims.push_back(ts.glowLight);
+        matrices.push_back((base->pose * Pose{ { 0, 0, 0.16 }, Quat::axisAngle({ 1, 0, 0 }, 3.14159265358979) }).matrix());
+    }
+
+    void toasterWrites(ovstage_ordinal_t ordinal)
+    {
+        if (!m_toaster)
+            return;
+        Toaster& ts = *m_toaster;
+        if (ts.colorDirty)
+        {
+            m_stage->writeFloats(ts.toastMaterial, "inputs:diffuseColor",
+                                 { ts.toastColor[0], ts.toastColor[1], ts.toastColor[2] }, ordinal);
+            ts.colorDirty = false;
+        }
+        if (ts.glowDirty)
+        {
+            const float k = static_cast<float>(kGlowEmission * std::clamp(ts.glow / ts.glowMax, 0.0, 1.0));
+            m_stage->writeFloats(ts.glowShader, "inputs:emissiveColor", { 1.0f * k, 0.38f * k, 0.08f * k }, ordinal);
+            m_stage->writeFloats(ts.glowLight, "inputs:intensity", { ts.glow }, ordinal);
+            ts.glowDirty = false;
+        }
+    }
+
     // --- per-frame stage writes ------------------------------------------------------------------
     void writeBodies(ovstage_ordinal_t ordinal)
     {
@@ -919,6 +1210,7 @@ private:
                                ? Pose{ m_placeAt, Quat::axisAngle({ 0, 0, 1 }, m_placeYaw) }.matrix()
                                : kHidden);
         hudTransforms(prims, matrices);
+        toasterTransforms(prims, matrices);
         if (m_browser.open)
         {
             prims.push_back(kBrowser);
@@ -946,6 +1238,7 @@ private:
         const double angle = -6.0 * seconds(m_start, Clock::now());
         matrices.push_back(spinning ? (m_browser.pose * Pose{ {}, Quat::axisAngle({ 0, 0, 1 }, angle) }).matrix() : kHidden);
         m_stage->writeTransforms(prims, matrices, ordinal);
+        toasterWrites(ordinal);
         if (m_hud.pending && m_hud.points.size() == kHudFloats)
         {
             m_stage->writePoints(kText, m_hud.points, ordinal);
@@ -1303,6 +1596,8 @@ private:
                 clear();
             else if (t == "fix")
                 fixCommand(msg.value("on", true));
+            else if (t == "toaster")
+                onToaster(msg);
             else if (t == "browser")
                 showBrowser(msg);
             else if (t == "browser_close")
@@ -1331,7 +1626,8 @@ private:
     {
         // A scene object made grabbable (sidecar desk_props): exactly where it stood, 2 mm up.
         if (const auto at = msg.value("position", std::vector<double>{}); at.size() == 3)
-            return { { at[0], at[1], at[2] + 0.002 + i * 0.2 } };
+            return { { at[0], at[1], at[2] + 0.002 + i * 0.2 },
+                     Quat::axisAngle({ 0, 0, 1 }, msg.value("yaw", 0.0) * 3.14159265358979 / 180.0) };
         const auto size = msg.value("size", std::vector<double>{ 0.2, 0.2, 0.2 });
         const double extent = std::max({ size[0], size[1], size[2] });
         Vec3 fwd{ 0, 1, 0 }, head{ 0, 0, 1.6 };
@@ -1392,7 +1688,7 @@ private:
         for (int i = 0; i < count; ++i)
         {
             if (m_props.size() >= kMaxProps)
-                removeProp(0);
+                removeProp(oldestRemovable());
             Pose pose = spawnPose(msg, i, count, sideSign);
             if (atMarker)  // standing on the marked spot, 2 mm up, facing the marker's arrow
                 pose = { m_placeAt + m_placeSide * ((i - (count - 1) / 2.0) * spacing) +
@@ -1428,8 +1724,11 @@ private:
             if (prop.spheres.size() != prop.bodies.size())
                 prop.spheres.clear();
             prop.movable = msg.value("body_movable", std::vector<bool>{});
-            prop.fixOnSpawn = atMarker;
+            prop.fixOnSpawn = atMarker || msg.value("fixed", false);
+            prop.device = msg.value("device", std::string());
             m_props.push_back(std::move(prop));
+            if (m_props.back().device == "toaster")
+                setupToaster(static_cast<int>(m_props.size()) - 1, msg);
         }
         rebuildBodyMap();
         logf("Spawned %d x %s", count, msg.value("name", "prop").c_str());
@@ -1450,26 +1749,48 @@ private:
         m_physics->forgetProp(prop.root);
         m_physics->sync(ordinal);
         m_props.erase(m_props.begin() + static_cast<long long>(index));
+        if (m_toaster && m_toaster->prop == static_cast<int>(index))
+            m_toaster.reset();
+        else if (m_toaster && m_toaster->prop > static_cast<int>(index))
+            --m_toaster->prop;
         rebuildBodyMap();
+    }
+
+    // Undo, clear and the prop limit leave device props (the toaster) alone.
+    size_t oldestRemovable() const
+    {
+        for (size_t i = 0; i < m_props.size(); ++i)
+            if (m_props[i].device.empty())
+                return i;
+        return 0;
+    }
+
+    int newestRemovable() const
+    {
+        for (int i = static_cast<int>(m_props.size()) - 1; i >= 0; --i)
+            if (m_props[i].device.empty())
+                return i;
+        return -1;
     }
 
     void undo()
     {
-        if (m_props.empty())
+        const int last = newestRemovable();
+        if (last < 0)
         {
             m_link.send({ { "t", "nothing_to_undo" } });
             return;
         }
-        const std::string name = m_props.back().name;
-        removeProp(m_props.size() - 1);
+        const std::string name = m_props[last].name;
+        removeProp(static_cast<size_t>(last));
         m_link.send({ { "t", "removed" }, { "name", name }, { "total", m_props.size() } });
     }
 
     void clear()
     {
-        const size_t n = m_props.size();
-        while (!m_props.empty())
-            removeProp(m_props.size() - 1);
+        size_t n = 0;
+        for (int i = newestRemovable(); i >= 0; i = newestRemovable(), ++n)
+            removeProp(static_cast<size_t>(i));
         m_link.send({ { "t", "cleared" }, { "n", n } });
     }
 
@@ -1504,6 +1825,7 @@ private:
     int m_lastProp = -1;  // the prop a hand last let go of (target of "fix it")
     std::vector<Hull> m_hulls;
     double m_dt = 1.0 / 72;
+    std::optional<Toaster> m_toaster;
     std::optional<nlohmann::json> m_pendingSpawn;  // a spawn waiting for its spot (place())
     int m_placeHand = 1;
     bool m_placeValid = false;  // m_placeAt is a surface the pointer found

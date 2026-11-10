@@ -1,0 +1,55 @@
+{
+  "fmu": "toaster_ctrl.fmu",
+  "model": "ToasterECU.ToasterController",
+  "tool": "OpenModelica 1.26.3",
+  "fmi": {
+    "version": "2.0",
+    "type": "CoSimulation",
+    "guid": "{d7d8a72c-d334-4bfe-84ca-d7f2897e584c}"
+  },
+  "sha256": "3695cd0a96163d5c12079987586e3249f50f7083716e3fac7caaf81b5e2f464a",
+  "software_version": "1.4.0",
+  "source": "source/ToasterECU.mo",
+  "owner": "dbeyond / dSimula",
+  "variables": {
+    "inputs": [
+      "cancel_pos",
+      "chamber_temp",
+      "dial_angle",
+      "lever_pos"
+    ],
+    "outputs": [
+      "eject",
+      "heater_glow",
+      "heater_power",
+      "lever_target",
+      "time_remaining",
+      "browning_level",
+      "latch_engaged"
+    ]
+  },
+  "dsimula": {
+    "maturity_state": null,
+    "calibration": {
+      "P_heater": 900,
+      "t_level": [
+        60,
+        80,
+        100,
+        120,
+        145,
+        170,
+        200
+      ],
+      "T_amb": 20,
+      "k_warm": 0.002,
+      "T_max": 250,
+      "Ts": 0.05,
+      "lever_down_below": -0.05,
+      "cancel_below": -0.0025,
+      "dial_band": 45,
+      "t_eject": 0.3
+    },
+    "note": "Written by dSimula when it releases the FMU into the registry; maturity_state links back to the signed snapshot."
+  }
+}

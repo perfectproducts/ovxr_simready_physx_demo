@@ -1,0 +1,212 @@
+{
+  "format_version": "1.0",
+  "items": [
+    {
+      "relative_path": "simready_usd/sm_appliance_toaster_a01_01.usd",
+      "size": 20147,
+      "hash": {
+        "sha256": "a2b48d791e2bf47c0f3e0941ef8f39018417f7a14f74022f716c910ea5606212"
+      }
+    },
+    {
+      "relative_path": "simready_usd/.thumbs/sm_appliance_toaster_a01_01_thumbnail.png",
+      "size": 384968,
+      "hash": {
+        "sha256": "1025d2f6123c86f1c4d3f5222725f143d54777f18e4a36cff36c0d3d62ec9bfc"
+      }
+    },
+    {
+      "relative_path": "simready_usd/.thumbs/256x256/sm_appliance_toaster_a01_01.usd.png",
+      "size": 824295,
+      "hash": {
+        "sha256": "b916b6b2b8d2a6ba0041ff69ef864f8915c66c5902f246db58c46e159081cfcb"
+      }
+    },
+    {
+      "relative_path": "simready_usd/.thumbs/256x256/sm_appliance_toaster_a01_01.usd_light.png",
+      "size": 611147,
+      "hash": {
+        "sha256": "01f6e1149bf06b5979489e05570171643d64e90d70317ca1e691d4b6b3455558"
+      }
+    },
+    {
+      "relative_path": "simready_usd/.thumbs/256x256/sm_appliance_toaster_a01_01.usd_transparent.png",
+      "size": 623608,
+      "hash": {
+        "sha256": "9f38ff9bf2fccc7c63d7a572f640740abf4ca7a67f97ea9278a8008a1541f00c"
+      }
+    },
+    {
+      "relative_path": "simready_usd/Textures/t_gen_appliance_toaster_v01_01_a.png",
+      "size": 2232020,
+      "hash": {
+        "sha256": "00505ffc87968d0630907d59c0ecb51a45eedbebcfc30313b49c0444d172e29e",
+        "sha256-first1m": "2af77ba503beb09d4c23d0a639d3d06fffdcc2aeab9191eba06bdbe77af54bf8"
+      }
+    },
+    {
+      "relative_path": "simready_usd/Textures/t_gen_appliance_toaster_v01_01_n.png",
+      "size": 3619280,
+      "hash": {
+        "sha256": "73f00b6ba66fdda26949222151fcd90c2b6c4c3db58ea6e3b71a46bfe99ecf55",
+        "sha256-first1m": "cd79ea6388d74781476c807e0e5b728ac7ff400846c2a18f9f0ee2c0599a1999"
+      }
+    },
+    {
+      "relative_path": "simready_usd/Textures/t_gen_appliance_toaster_v01_01_orm.png",
+      "size": 2867431,
+      "hash": {
+        "sha256": "05c52c90886b394cb454c3175ec16d5740e62473719c2eddc00253d8497d4886",
+        "sha256-first1m": "5ac7cba57f156b0888abad08daa0d88831e13d261c3a04bb252f449dc7c5a436"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/base.usda",
+      "size": 32190,
+      "hash": {
+        "sha256": "c9fb88fd16d1068e21cca796c8300e1725df31eae3e150fc2266f2a3da1f7115"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/geometries.usd",
+      "size": 2051033,
+      "hash": {
+        "sha256": "760f50810e0a38fde78df447afe48e7772dcb0bda937a069f5c2d3d279b83dac",
+        "sha256-first1m": "24d719148532cc35053d166dabbb1a0a4a156fc3cfd6cb10cb2cbca18cad22ef"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/instances.usda",
+      "size": 2005634,
+      "hash": {
+        "sha256": "df2f49ca25cdba5ecdc4029d7caf1b014bb23ba687d78ec8913f9dccb8073262",
+        "sha256-first1m": "70f82368392450f72a959521bf5b2c3ec4b2829014341c461b56904b81706eca"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/instances_mujoco.usda",
+      "size": 2006994,
+      "hash": {
+        "sha256": "8998089dcf01685f0676e807625cbc4413000828e53b864b1c43c38f65d7d8b8",
+        "sha256-first1m": "618f5a18ece965ae70b9331a7a578e66f41aa4cae27315c01eeb45ca5fce7d0e"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/instances_newton.usda",
+      "size": 2006249,
+      "hash": {
+        "sha256": "442e680a4e2231ab4696463ba03bd932841bab570768ebe06a2a6c5db81ae51b",
+        "sha256-first1m": "c60899f6b7614677b2fc524ec84bb27a67dce8adb43997a01249b2c9973f61d3"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/instances_physx.usda",
+      "size": 2006334,
+      "hash": {
+        "sha256": "bc9a4e34109d0693002e77ca460b334f65ab716e029b49c03932bf4e94fc87b1",
+        "sha256-first1m": "e3b0b09e96cf6a3adddfdc7c5b76098104197b262a02c710a8399bc983c8b608"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/materials.usda",
+      "size": 14885,
+      "hash": {
+        "sha256": "6d1a8c737bc3cc5bd378fd0196eee4126da2ba70033f975127e33677be8b1f44"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/MuJoCo/disabled.usda",
+      "size": 4148,
+      "hash": {
+        "sha256": "9617e3b1489a927c61376c213db0d2d6db96d1f10e30e2a3e99e4ec6f882ae80"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/MuJoCo/enabled.usda",
+      "size": 7468,
+      "hash": {
+        "sha256": "7eb784c33dfdec4f1b7f1567bca0f7d909e390439ab9501d13db88882a5f4b4f"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/Newton/disabled.usda",
+      "size": 4148,
+      "hash": {
+        "sha256": "9617e3b1489a927c61376c213db0d2d6db96d1f10e30e2a3e99e4ec6f882ae80"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/Newton/enabled.usda",
+      "size": 5865,
+      "hash": {
+        "sha256": "e10c9be3768e3673cb12030941bab14a1f7552dc5164cf7323336fc20aa882d2"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/PhysX/disabled.usda",
+      "size": 4148,
+      "hash": {
+        "sha256": "9617e3b1489a927c61376c213db0d2d6db96d1f10e30e2a3e99e4ec6f882ae80"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/PhysX/enabled.usda",
+      "size": 5321,
+      "hash": {
+        "sha256": "f9fa90f76100ffe99f2dbc8f477b235909facc9f7ba12538978b75dfdd09894d"
+      }
+    },
+    {
+      "relative_path": "simready_usd/payloads/Physics/physics.usda",
+      "size": 10868,
+      "hash": {
+        "sha256": "3d33888e6f102fa38bdddfd2a148e98355b06a97d75ddc3ee14bcadc92981658"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/OmniPBR.mdl",
+      "size": 16010,
+      "hash": {
+        "sha256": "6e6b3acbccd236e21a6c29964a431d2a53e77251cc6b8b1bc975eb1c62da1781"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/OmniPBRBase.mdl",
+      "size": 19369,
+      "hash": {
+        "sha256": "a8fd9fe174e91892e94d06da90ba453a124024c2ce2c033be9d82c9e2f76a3b7"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/OmniPBR_ClearCoat.mdl",
+      "size": 29789,
+      "hash": {
+        "sha256": "d84c5ba482561c0eaea2e0c5b607358af549e36cd921773462f92dbc4f32cbc3"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/t_gen_appliance_toaster_v01_01_a.png",
+      "size": 2232020,
+      "hash": {
+        "sha256": "00505ffc87968d0630907d59c0ecb51a45eedbebcfc30313b49c0444d172e29e",
+        "sha256-first1m": "2af77ba503beb09d4c23d0a639d3d06fffdcc2aeab9191eba06bdbe77af54bf8"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/t_gen_appliance_toaster_v01_01_n.png",
+      "size": 3619280,
+      "hash": {
+        "sha256": "73f00b6ba66fdda26949222151fcd90c2b6c4c3db58ea6e3b71a46bfe99ecf55",
+        "sha256-first1m": "cd79ea6388d74781476c807e0e5b728ac7ff400846c2a18f9f0ee2c0599a1999"
+      }
+    },
+    {
+      "relative_path": "simready_usd/source_assets/t_gen_appliance_toaster_v01_01_orm.png",
+      "size": 2867431,
+      "hash": {
+        "sha256": "05c52c90886b394cb454c3175ec16d5740e62473719c2eddc00253d8497d4886",
+        "sha256-first1m": "5ac7cba57f156b0888abad08daa0d88831e13d261c3a04bb252f449dc7c5a436"
+      }
+    }
+  ]
+}

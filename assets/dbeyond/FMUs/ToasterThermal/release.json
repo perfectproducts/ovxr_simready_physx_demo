@@ -1,0 +1,27 @@
+{
+  "fmu": "toaster_thermal.fmu",
+  "model": "ToasterECU.ToasterThermal",
+  "tool": "OpenModelica 1.26.3",
+  "fmi": {
+    "version": "2.0",
+    "type": "CoSimulation",
+    "guid": "{2b18ccf1-4626-4347-bfbd-568a2b432880}"
+  },
+  "sha256": "63f36bc20500de662b739143efb80443c1ec3e0c00c3f14412244ef615660a57",
+  "software_version": "1.4.0",
+  "source": "../ToasterECU/source/ToasterECU.mo",
+  "owner": "simulation team",
+  "variables": {
+    "inputs": [
+      "heater_power",
+      "lever_pos"
+    ],
+    "outputs": [
+      "browning",
+      "chamber_temp",
+      "toast_b",
+      "toast_g",
+      "toast_r"
+    ]
+  }
+}
