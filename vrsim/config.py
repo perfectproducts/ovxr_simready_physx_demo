@@ -102,6 +102,22 @@ class ToasterConfig:
     enabled: bool = field(default_factory=lambda: os.environ.get("VRSIM_TOASTER", "").strip().lower() not in ("none", "0", "off"))
     position: tuple[float, float, float] = (-0.62, 0.64, 0.783)  # toaster origin (bottom centre) [m]
     yaw: float = -97.0  # [deg] about +Z
+    # FMU monitor panel (vrsim/toaster_monitor.py): centre in the toaster frame, on the side away from
+    # the toast's flight; it stands on the desk and turns to the head. Left menu button hides it.
+    monitor_offset: tuple[float, float] = field(default_factory=lambda: tuple(
+        float(v) for v in (os.environ.get("VRSIM_MONITOR_OFFSET") or "0,-0.34").split(",")))  # [m] toaster x, y[, surface h]
+    # Size factor of the FMU monitor panel (0.40 x 0.30 m at 1). VRSIM_MONITOR_SCALE sets it.
+    monitor_scale: float = field(default_factory=lambda: float(os.environ.get("VRSIM_MONITOR_SCALE", "1") or 1))
+    # Real seconds a toasting cycle takes, whatever the dial says (60-200 s of model time): while
+    # the heater is on the FMUs run that much faster. 0 = real time. VRSIM_TOAST_SECONDS sets it.
+    toast_seconds: float = field(default_factory=lambda: float(os.environ.get("VRSIM_TOAST_SECONDS", "0") or 0))
+    # How high the ejected toast rises above the slot [m]; it lands on the same spot. 0 = the
+    # ToastFlight FMU's authored launch (about 0.46 m). VRSIM_EJECT_HEIGHT sets it.
+    eject_height: float = field(default_factory=lambda: float(os.environ.get("VRSIM_EJECT_HEIGHT", "0") or 0))
+    # After the toast lands: a fresh slice in the slot and the toaster reset, ready for the next
+    # cycle (the Newton app also leaves the toasted slice on the desk). VRSIM_NEW_TOAST=1 sets it.
+    new_toast_after_eject: bool = field(default_factory=lambda: os.environ.get("VRSIM_NEW_TOAST", "").strip().lower()
+                                        in ("1", "true", "on", "yes"))
 
 
 @dataclass

@@ -50,6 +50,7 @@ LINEAR, ANGULAR = "state:linear:physics:position", "state:angular:physics:positi
 LATCH = "drive:linear:physics:targetPosition"
 
 STEP = 0.01  # [s] co-simulation step; the ECU samples every 0.05 s inside its FMU
+MONITOR_PERIOD = 0.35  # [s] monitor panel redraw while shown
 JOINTS = {"lever": (LEVER, LINEAR), "dial": (DIAL, ANGULAR), "cancel": (CANCEL, LINEAR)}
 
 
@@ -109,7 +110,7 @@ def read_binding(stage) -> list[Instance]:
 class Fmu:
     """Minimal FMI 2.0 / 3.0 co-simulation wrapper around FMPy."""
 
-    def __init__(self, path: Path, name: str):
+    def __init__(self, path: Path, name: str, params: dict[str, float] | None = None):
         from fmpy import extract, instantiate_fmu, read_model_description
 
         self.name = name
@@ -123,6 +124,8 @@ class Fmu:
         else:
             self.inst.setupExperiment(startTime=0.0)
             self.inst.enterInitializationMode()
+        for var, value in (params or {}).items():  # parameter overrides, before the model initializes
+            self.set(var, value)
         self.inst.exitInitializationMode()
 
     def set(self, var: str, value: float) -> None:
@@ -158,9 +161,13 @@ class Fmu:
 class CoSimulation:
     """The FMUs of one binding, routed through ``usd`` ({prim path: {attribute: value}})."""
 
-    def __init__(self, instances: list[Instance], initial: dict[str, dict]):
+    def __init__(self, instances: list[Instance], initial: dict[str, dict],
+                 params: dict[str, dict[str, float]] | None = None):
+        """``params``: parameter overrides per FMU instance name, e.g. {"ToastFlight": {"v_launch[3]": 4.0}}."""
         self.usd = {prim: dict(attrs) for prim, attrs in initial.items()}
-        self.fmus = [(Fmu(inst.fmu, inst.path.rsplit("/", 1)[-1]), inst.connections) for inst in instances]
+        names = [inst.path.rsplit("/", 1)[-1] for inst in instances]
+        self.fmus = [(Fmu(inst.fmu, name, (params or {}).get(name)), inst.connections)
+                     for inst, name in zip(instances, names)]
         self.t = 0.0
 
     def fmu(self, name: str) -> Fmu:
@@ -324,6 +331,28 @@ class ToasterScenario:
         }
 
 
+def flight_params(scenario: "ToasterScenario", eject_height: float) -> dict[str, float]:
+    """ToastFlight launch velocity for a toast that rises ``eject_height`` metres above where it
+    leaves the slot and still lands where the authored launch puts it (on the desk in front of
+    the laptop): a faster vertical launch with a slower horizontal one."""
+    from fmpy import read_model_description
+
+    flight = next(i for i in scenario.instances if i.path.endswith("/ToastFlight"))
+    start = {v.name: float(v.start) for v in read_model_description(str(flight.fmu)).modelVariables
+             if v.start is not None and v.causality == "parameter"}
+    g, vy0, vz0 = start.get("g", 9.81), start["v_launch[2]"], start["v_launch[3]"]
+    drop = start.get("z_up", 0.17) - start.get("z_rest", 0.006)
+
+    def airtime(vz: float) -> float:
+        return (vz + np.sqrt(vz * vz + 2 * g * drop)) / g
+
+    vz = float(np.sqrt(2 * g * eject_height))
+    vy = vy0 * airtime(vz0) / airtime(vz)
+    log.info("Toast eject: %.2f m high (authored %.2f m), launch (%.2f, %.2f) m/s", eject_height,
+             vz0 * vz0 / (2 * g), vy, vz)
+    return {"v_launch[2]": vy, "v_launch[3]": vz}
+
+
 def browning_word(b: float) -> str:
     return ("untoasted" if b < 0.15 else "barely warm" if b < 0.5 else "light" if b < 0.85 else
             "golden" if b < 1.3 else "dark" if b < 1.7 else "burnt")
@@ -335,11 +364,20 @@ class ToasterDevice:
     ``send(dict)`` delivers ``toaster`` messages to the app; ``feedback.post`` shows events
     (heating starts, the dial changes level, the toast pops up) on the info panel."""
 
-    def __init__(self, scenario: ToasterScenario, send, feedback=None):
+    def __init__(self, scenario: ToasterScenario, send, feedback=None, monitor: bool = False,
+                 toast_seconds: float = 0.0, eject_height: float = 0.0, on_landed=None):
         self.scenario = scenario
+        # Called (from a timer thread) 1.5 s after the ejected toast lands.
+        self.on_landed = on_landed
+        self._toast_mode_seen = 0
+        # > 0: a heating cycle takes this many real seconds; the co-simulation runs faster while the
+        # heater is on (timer, chamber temperature and browning together), real time otherwise.
+        self.toast_seconds = max(float(toast_seconds or 0.0), 0.0)
+        self._speed = 1.0
         self.send = send
         self.feedback = feedback
-        self.sim = CoSimulation(scenario.instances, scenario.initial)
+        self.sim = CoSimulation(scenario.instances, scenario.initial,
+                                {"ToastFlight": flight_params(scenario, eject_height)} if eject_height > 0 else None)
         self._lock = threading.Lock()
         self._inputs: dict[str, float] = {}
         self._stop = threading.Event()
@@ -349,8 +387,20 @@ class ToasterDevice:
         self._level = None
         self._cancel_seen = False
         self._toast_mode = 0
+        # FMU monitor panel beside the toaster (vrsim/toaster_monitor.py): sampled here, drawn on its
+        # own thread while the app shows it.
+        from .toaster_monitor import MonitorRenderer, snapshot
+
+        self._snapshot = snapshot
+        self.monitor = MonitorRenderer()
+        self._monitor_on = threading.Event()
+        if monitor:
+            self._monitor_on.set()
+        self._latest: dict | None = None
         self._thread = threading.Thread(target=self._run, daemon=True, name="toaster")
         self._thread.start()
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="toaster-monitor")
+        self._monitor_thread.start()
         log.info("Toaster co-simulation running: %s", ", ".join(f.name for f, _ in self.sim.fmus))
 
     def set_inputs(self, lever: float | None = None, dial: float | None = None, cancel: float | None = None) -> None:
@@ -359,23 +409,50 @@ class ToasterDevice:
                 if value is not None and np.isfinite(value):
                     self._inputs[role] = float(value)
 
+    def set_monitor(self, on: bool) -> None:
+        if on:
+            self.monitor.reset_sent()  # the app may have dropped what it had: send every layer again
+            self._monitor_on.set()
+        else:
+            self._monitor_on.clear()
+
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=2.0)
+        self._monitor_thread.join(timeout=2.0)
         self.sim.close()
+
+    def _monitor_loop(self) -> None:
+        try:
+            while not self._stop.wait(MONITOR_PERIOD):
+                if not self._monitor_on.is_set():
+                    continue
+                with self._lock:
+                    latest, history = self._latest, list(self.monitor.history)
+                if latest is None:
+                    continue
+                msg = self.monitor.frame_message(latest, history)  # draws outside the lock (~40 ms)
+                if msg:
+                    self.send(msg)
+        except Exception:
+            log.exception("Toaster monitor stopped")
 
     # --- thread ---------------------------------------------------------------------------------
     def _run(self) -> None:
-        start = time.perf_counter()
+        last = time.perf_counter()
+        budget = 0.0  # model time owed to the simulation [s]
         try:
             while not self._stop.is_set():
-                now = time.perf_counter() - start
-                steps = 0
-                while self.sim.t + STEP <= now and steps < 25:
+                now = time.perf_counter()
+                budget += (now - last) * self._speed
+                last = now
+                steps, limit = 0, max(25, int(25 * self._speed))
+                while budget >= STEP and steps < limit:
                     self._step()
+                    budget -= STEP
                     steps += 1
-                if self.sim.t + STEP <= now:  # fell behind (debugger, sleep): don't try to catch up
-                    start = time.perf_counter() - self.sim.t
+                if budget >= STEP:  # fell behind (debugger, sleep): don't try to catch up
+                    budget = 0.0
                 if steps:
                     self._publish()
                 time.sleep(STEP * 0.5)
@@ -390,16 +467,34 @@ class ToasterDevice:
             if role in inputs:
                 usd.setdefault(prim, {})[attr] = inputs[role]
         self.sim.step(STEP)
+        if int(round(self.sim.t / STEP)) % 10 == 0:  # monitor samples every 0.1 s
+            v = self._snapshot(self.sim)
+            with self._lock:
+                self._latest = v
+                self.monitor.record(v)
         self._events()
 
     def _events(self) -> None:
-        if self.feedback is None:
-            return
+        mode = int(self.sim.fmu("ToastFlight").get("toast_mode"))  # 0 in slot, 1 flying, 2 landed
+        if mode == 2 and self._toast_mode_seen != 2 and self.on_landed is not None:
+            timer = threading.Timer(1.5, self.on_landed)
+            timer.daemon = True
+            timer.start()
+        self._toast_mode_seen = mode
         usd, ecu = self.sim.usd, self.sim.fmu("ToasterECU")
         ch = usd.get(CHAMBER, {})
         heating = ch.get("toaster:heaterPower", 0.0) > 0
-        level = int(ecu.get("browning_level"))
         remaining = usd.get(DISPLAY, {}).get("toaster:timeRemaining", 0.0)
+        if heating and not self._heating and self.toast_seconds > 0:
+            self._speed = max(1.0, remaining / self.toast_seconds)  # the cycle fits toast_seconds
+            log.info("Toasting %.0f s of model time in %.0f s (x%.1f)", remaining, self.toast_seconds, self._speed)
+        elif not heating:
+            self._speed = 1.0  # the toast's flight and cooling run in real time
+        if self.feedback is None:
+            self._heating = heating
+            return
+        level = int(ecu.get("browning_level"))
+        remaining /= self._speed  # real seconds
         cancel = usd.get(CANCEL, {}).get(LINEAR, 0.0) < -0.0025
         browning = ch.get("toaster:browning", 0.0)
         if heating and not self._heating:

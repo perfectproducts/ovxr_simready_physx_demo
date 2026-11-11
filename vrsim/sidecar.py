@@ -14,10 +14,14 @@ one localhost TCP connection carrying JSON lines.
                     "body_spheres":[[cx,cy,cz,r],..],"body_movable":[bool,..],
                     "position":[x,y,z] (optional: place the asset origin there, unrotated)}
                    {"t":"undo"}  {"t":"clear"}  {"t":"fix","on":true|false}  (a held / last touched prop)
+                   {"t":"realign"}  (move the scene so the user's head is at the seat, facing the desk)
                    {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
   toaster (vrsim/toaster.py): spawned with "device":"toaster", then
   app -> sidecar   {"t":"toaster_in","lever":m,"dial":deg,"cancel":m}
   sidecar -> app   {"t":"toaster","lever_target":m,"toast":[x,y,z,rot],"toast_color":[r,g,b],"glow":..,...}
+  toaster monitor (vrsim/toaster_monitor.py): spawn field "monitor":{layer,layers,z,offset,swatch}, then
+  sidecar -> app   {"t":"toaster_monitor_frame","layers":{name:"<base64 float32 x0,y0,x1,y1 ...>"}}
+  app -> sidecar   {"t":"toaster_monitor","on":bool}
 
     uv run python -m vrsim.sidecar           (then start cpp\\build\\vrsim_cpp.exe)
 """
@@ -45,6 +49,7 @@ from .config import Config
 from .hud import Feedback, TextLayout, download_progress
 from .scene import write_desk_prop, write_environment, write_placement_hulls
 from .toaster import ToasterDevice, ToasterScenario
+from .toaster_monitor import monitor_extras
 from .voice import Command, VoiceListener, start_console
 
 log = logging.getLogger("vrsim.sidecar")
@@ -125,6 +130,7 @@ class Sidecar:
         self.toaster: ToasterScenario | None = None
         self.toaster_info = None
         self.toaster_device: ToasterDevice | None = None
+        self.toaster_monitor_on = True  # the panel beside the toaster; the app toggles it (left menu button)
         if config.environment.usd is not None and config.environment.toaster.enabled:
             try:
                 t = config.environment.toaster
@@ -241,6 +247,10 @@ class Sidecar:
             self.commands.put(Command("cancel", text="✕"))
         elif kind == "browser_toggle":
             self.commands.put(Command("browser_close") if self.page else Command("query", ""))
+        elif kind == "toaster_monitor":
+            self.toaster_monitor_on = bool(msg.get("on", True))
+            if self.toaster_device:
+                self.toaster_device.set_monitor(self.toaster_monitor_on)
         elif kind == "toaster_in" and self.toaster_device:
             self.toaster_device.set_inputs(msg.get("lever"), msg.get("dial"), msg.get("cancel"))
         elif kind == "new_toast":
@@ -261,6 +271,10 @@ class Sidecar:
                     self._answer_query(command.query)
                 elif command.kind == "cancel":
                     self._cancel_downloads(command.text != "✕")
+                elif command.kind == "realign":
+                    self.link.send({"t": "realign"})
+                    self.feedback.post("ok", "Room realigned", "the desk is in front of you again · say “realign” any time",
+                                       hold=4.0)
                 elif command.kind == "new_toast":
                     self._on_app_message({"t": "new_toast"})
                 elif command.kind in ("undo", "clear"):
@@ -289,8 +303,22 @@ class Sidecar:
         if respawn:
             self._quiet_spawns += 1
             self.link.send({"t": "spawn", "name": "Smart toaster", "count": 1, **self._spawn_payload(self.toaster_info),
-                            "position": list(self.toaster.position), **self.toaster.spawn_extras()})
-        self.toaster_device = ToasterDevice(self.toaster, self.link.send, self.feedback)
+                            "position": list(self.toaster.position), **self.toaster.spawn_extras(),
+                            "monitor": monitor_extras(self.config.generated_dir,
+                                                      self.config.environment.toaster.monitor_offset,
+                                                      self.config.environment.toaster.monitor_scale)})
+        t = self.config.environment.toaster
+        self.toaster_device = ToasterDevice(self.toaster, self.link.send, self.feedback, monitor=self.toaster_monitor_on,
+                                            toast_seconds=t.toast_seconds, eject_height=t.eject_height,
+                                            on_landed=self._toast_landed if t.new_toast_after_eject else None)
+
+    def _toast_landed(self) -> None:
+        """The ejected toast has landed: a fresh slice into the slot and a reset toaster."""
+        try:
+            self._start_toaster(respawn=False)
+            self.feedback.post("ok", "Fresh toast in the slot", "push the lever down for the next one", hold=5.0)
+        except Exception:
+            log.exception("New toast failed")
 
     def _stop_toaster(self) -> None:
         device, self.toaster_device = self.toaster_device, None
