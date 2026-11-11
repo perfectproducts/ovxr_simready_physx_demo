@@ -59,6 +59,8 @@ const char* kMarker = "/World/Hands/PlaceMarker";  // red sphere + arrow: where 
 const char* kLoading = "/World/BrowserLoading";  // vrsim.browser loading overlay, in the environment
 const char* kSpinner = "/World/BrowserLoading/Spinner";
 const char* kAccents[3] = { "/World/HUD/Panel/AccentBusy", "/World/HUD/Panel/AccentOk", "/World/HUD/Panel/AccentError" };
+const char* kRig = "/World/Rig";  // ovxr tracking anchor: world = rig * tracking pose
+const char* kMonitor = "/World/ToasterMonitor";  // vrsim.toaster_monitor panel beside the toaster
 const Mat16 kHidden = Pose{ { 0, 0, -100 } }.matrix({ 1e-4, 1e-4, 1e-4 });
 
 double seconds(Clock::time_point a, Clock::time_point b)
@@ -248,6 +250,25 @@ struct Browser
     std::array<bool, 2> triggerDown{}, stickArmed{ true, true };
 };
 
+// The toaster's FMU monitor (vrsim/toaster_monitor.py): a panel layer referenced at kMonitor with one
+// fixed-budget quad mesh per colour; the sidecar sends rectangles, the app rewrites the points.
+struct MonitorPanel
+{
+    struct Layer
+    {
+        std::string prim;
+        size_t budget = 0;
+        float z = 0.002f;
+        std::vector<float> points;
+        bool pending = false;
+    };
+    ovstage_population_usd_reference_handle_t handle = 0;
+    bool on = true;
+    std::vector<Layer> layers;
+    Vec3 offset{ 0, -0.34, 0.19 };  // panel centre in the toaster frame
+    std::string swatch;             // its toast-colour shader
+};
+
 struct Hud
 {
     std::vector<float> points;
@@ -362,6 +383,9 @@ public:
             {
                 input = m_xr->sync(plan.timing.predicted_display_time_ns);
                 if (input.headValid)
+                    m_rawHead = input.head;
+                toWorld(input);
+                if (input.headValid)
                     m_head = input.head;
                 buttons(input);
                 browserGrab(input);  // before interact(): grip on the handle must not grab props
@@ -449,6 +473,42 @@ public:
 
 private:
     // --- input ---------------------------------------------------------------------------------
+    // Tracking poses -> world through the rig (ovxr renders with the same anchor, see kRig).
+    void toWorld(InputFrame& in) const
+    {
+        in.head = m_rig * in.head;
+        for (HandInput& hi : in.hands)
+        {
+            hi.grip = m_rig * hi.grip;
+            hi.aim = m_rig * hi.aim;
+        }
+    }
+
+    // "realign": turn and shift the rig so the head stands over the scene's seat spot (the world
+    // origin, where config.EnvironmentConfig.offset puts the user) and looks along +Y at the desk.
+    // Heading only; the floor stays the floor.
+    void realign()
+    {
+        if (!m_rawHead)
+            return;
+        Vec3 f = m_rawHead->axis({ 0, 0, -1 });
+        f.z = 0;
+        if (f.length() < 1e-3)
+            return;
+        f = f.normalized();
+        const Quat q = Quat::axisAngle({ 0, 0, 1 }, 3.14159265358979 / 2 - std::atan2(f.y, f.x));
+        const Vec3 head{ m_rawHead->p.x, m_rawHead->p.y, 0 };
+        m_rig = Pose{ Vec3{ 0, 0, 0 } - q.rotate(head), q };
+        for (Hand& h : m_hands)
+            h.history.clear();  // no throw from the jump
+        m_hud.pos.reset();      // the info panel settles in front again
+        if (m_xr)
+            for (int h = 0; h < 2; ++h)
+                m_xr->haptic(h, 0.4f, 0.05f);
+        logf("Realigned: rig at (%.2f, %.2f), heading %.0f deg", m_rig.p.x, m_rig.p.y,
+             std::atan2(f.y, f.x) * 180 / 3.14159265358979);
+    }
+
     void buttons(const InputFrame& in)
     {
         const auto& h = in.hands;
@@ -463,6 +523,14 @@ private:
             m_pendingSpawn ? cancelPlacement() : undo();
         if (h[0].secondaryPressed)
             clear();
+        if ((h[0].menuPressed || h[1].menuPressed) && m_monitor.handle)
+        {
+            m_monitor.on = !m_monitor.on;
+            m_link.send({ { "t", "toaster_monitor" }, { "on", m_monitor.on } });
+            m_xr->haptic(0, 0.3f, 0.03f);
+            if (m_toaster)
+                m_toaster->colorDirty = true;  // repaint the swatch with the panel
+        }
     }
 
     // A body's bounding sphere in the world; without per-body spheres, the whole prop's.
@@ -993,7 +1061,66 @@ private:
             return;
         }
         m_toaster = t;
+        if (msg.contains("monitor") && msg["monitor"].is_object())
+            setupMonitor(msg["monitor"]);
         logf("Toaster ready: lever body %d, dial %d, cancel %d", t.lever.body, t.dial.body, t.cancel.body);
+    }
+
+    void setupMonitor(const nlohmann::json& m)
+    {
+        if (!m_monitor.handle)
+        {
+            std::ifstream file(m.value("layer", ""), std::ios::binary);
+            const std::string layer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            if (layer.empty())
+            {
+                logf("Toaster monitor: layer %s not readable", m.value("layer", "").c_str());
+                return;
+            }
+            m_monitor.handle = m_stage->addReference(layer, kMonitor, m_stage->current());
+            m_stage->commit();
+        }
+        m_monitor.layers.clear();
+        const auto z = m.value("z", nlohmann::json::object());
+        const auto layers = m.value("layers", nlohmann::json::object());  // a named copy: items() of a temporary dangles
+        for (const auto& [name, budget] : layers.items())
+        {
+            MonitorPanel::Layer l;
+            l.prim = std::string(kMonitor) + "/" + name;
+            l.budget = budget.get<size_t>();
+            l.z = z.contains(name) ? z[name].get<float>() : 0.002f;
+            m_monitor.layers.push_back(std::move(l));
+        }
+        const auto o = m.value("offset", std::vector<double>{ 0, -0.34, 0.19 });
+        m_monitor.offset = { o[0], o[1], o[2] };
+        m_monitor.swatch = std::string(kMonitor) + "/" + m.value("swatch", std::string("Looks/Swatch/Surface"));
+        m_link.send({ { "t", "toaster_monitor" }, { "on", m_monitor.on } });  // and ask for a full frame
+        logf("Toaster monitor: %zu layers (left menu button shows / hides it)", m_monitor.layers.size());
+    }
+
+    // Rectangles (x0, y0, x1, y1, panel-local metres) -> the layer's quad points; unused quads collapse.
+    void monitorFrame(const nlohmann::json& msg)
+    {
+        const auto layers = msg.value("layers", nlohmann::json::object());
+        for (const auto& [name, data] : layers.items())
+        {
+            const std::string prim = std::string(kMonitor) + "/" + name;
+            for (MonitorPanel::Layer& l : m_monitor.layers)
+            {
+                if (l.prim != prim)
+                    continue;
+                const std::vector<float> r = decodeBase64Floats(data.get<std::string>());
+                l.points.assign(l.budget * 12, 0.0f);
+                const size_t n = std::min(l.budget, r.size() / 4);
+                for (size_t i = 0; i < n; ++i)
+                {
+                    const float x0 = r[4 * i], y0 = r[4 * i + 1], x1 = r[4 * i + 2], y1 = r[4 * i + 3];
+                    const float corners[12] = { x0, y0, l.z, x1, y0, l.z, x1, y1, l.z, x0, y1, l.z };
+                    std::copy_n(corners, 12, l.points.begin() + 12 * i);
+                }
+                l.pending = true;
+            }
+        }
     }
 
     // A part's pose in the toaster frame (the housing body).
@@ -1153,6 +1280,18 @@ private:
         matrices.push_back(base->pose.matrix());
         prims.push_back(ts.glowLight);
         matrices.push_back((base->pose * Pose{ { 0, 0, 0.16 }, Quat::axisAngle({ 1, 0, 0 }, 3.14159265358979) }).matrix());
+        if (m_monitor.handle)
+        {
+            // Beside the toaster, standing upright, turned toward the head (about the vertical only).
+            const Vec3 p = (base->pose * Pose{ m_monitor.offset }).p;
+            Vec3 z = (m_head ? m_head->p : p + base->pose.axis({ 1, 0, 0 })) - p;
+            z.z = 0;
+            z = z.length() > 1e-3 ? z.normalized() : Vec3{ 1, 0, 0 };
+            const Vec3 up{ 0, 0, 1 }, x = up.cross(z);
+            const double m[16] = { x.x, x.y, x.z, 0, up.x, up.y, up.z, 0, z.x, z.y, z.z, 0, p.x, p.y, p.z, 1 };
+            prims.push_back(kMonitor);
+            matrices.push_back(m_monitor.on ? Pose::fromMatrix(m).matrix() : kHidden);
+        }
     }
 
     void toasterWrites(ovstage_ordinal_t ordinal)
@@ -1164,8 +1303,21 @@ private:
         {
             m_stage->writeFloats(ts.toastMaterial, "inputs:diffuseColor",
                                  { ts.toastColor[0], ts.toastColor[1], ts.toastColor[2] }, ordinal);
+            if (m_monitor.handle && m_monitor.on)
+            {
+                const auto& c = ts.toastColor;
+                m_stage->writeFloats(m_monitor.swatch, "inputs:diffuseColor", { c[0], c[1], c[2] }, ordinal);
+                m_stage->writeFloats(m_monitor.swatch, "inputs:emissiveColor", { 0.5f * c[0], 0.5f * c[1], 0.5f * c[2] }, ordinal);
+            }
             ts.colorDirty = false;
         }
+        if (m_monitor.on)
+            for (MonitorPanel::Layer& l : m_monitor.layers)
+                if (l.pending && l.points.size() == l.budget * 12)
+                {
+                    m_stage->writePoints(l.prim, l.points, ordinal);
+                    l.pending = false;
+                }
         if (ts.glowDirty)
         {
             const float k = static_cast<float>(kGlowEmission * std::clamp(ts.glow / ts.glowMax, 0.0, 1.0));
@@ -1196,6 +1348,8 @@ private:
     {
         std::vector<std::string> prims;
         std::vector<Mat16> matrices;
+        prims.push_back(kRig);
+        matrices.push_back(m_rig.matrix());
         for (int h = 0; h < 2; ++h)
         {
             const HandInput& hi = in.hands[h];
@@ -1598,6 +1752,10 @@ private:
                 fixCommand(msg.value("on", true));
             else if (t == "toaster")
                 onToaster(msg);
+            else if (t == "toaster_monitor_frame")
+                monitorFrame(msg);
+            else if (t == "realign")
+                realign();
             else if (t == "browser")
                 showBrowser(msg);
             else if (t == "browser_close")
@@ -1813,6 +1971,9 @@ private:
     Hand m_hands[2];
     Hud m_hud;
     Browser m_browser;
+    MonitorPanel m_monitor;
+    Pose m_rig;                     // tracking -> world (identity until "realign")
+    std::optional<Pose> m_rawHead;  // head in tracking space
     struct
     {
         double drive = 0, step = 0, read = 0, write = 0, bind = 0, submit = 0;

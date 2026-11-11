@@ -184,8 +184,28 @@ version as ovxr, all three libraries share one stage in one process.
 
 ### The world: a garden study under an HDRI sky
 
-The room is *Studierstube*, a small garden pavilion with a desk, built in Blender and exported
-as a single USDZ. It is static architecture with no physics, so the app adds a static convex
+The room is *Studierstube*, a small garden pavilion with a desk. I didn't model it by hand. I gave
+**GPT6-Astra** two reference images, a study terrace and a technology workspace, and it wrote a
+Python script that builds the scene procedurally in **Blender**. The images guided the design; this
+is not photogrammetry or automatic 3D reconstruction (details in [image2vr.md](image2vr.md)).
+
+- **Interpretation.** The wooden desk, OpenUSD laptop, brass lamp, books, plants and warm outdoor
+  light became an open study pavilion. The pergola was a design addition, and the skyline and
+  Easter decorations in the references were left out.
+- **Simple geometry.** Cubes for furniture, planks, books and laptop parts, cylinders for pots,
+  branches and lamp parts, and low-resolution spheres for leaves and knobs, with small bevels to
+  soften the edges.
+- **Real-world scale.** Metres as scene units. The pavilion is about 5.6 × 4.8 m, and the desk
+  surface is about 0.82 m high.
+- **Materials and light.** Shared solid-colour PBR materials for oak, brass, plaster, foliage
+  and fabric, with daylight-style lighting. There are no photographic textures, which gives the
+  scene its stylized look.
+- **Lightweight.** 41,860 triangles and no external texture dependencies. Blender's USD exporter
+  writes it as a single USDZ.
+
+<!-- IMAGE: the two reference images next to the finished Blender scene -->
+
+The USDZ is static architecture with no physics, so the app adds a static convex
 collider to every solid mesh when it loads the scene. It also shifts the scene so the deck sits
 at your real floor level and the desk is in front of you.
 
