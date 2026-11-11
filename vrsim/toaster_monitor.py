@@ -46,6 +46,20 @@ LAYERS = {
     "Cyan": ((0.35, 0.78, 1.0), (0.25, 0.65, 0.95), 900),
     "Green": ((0.4, 0.92, 0.5), (0.3, 0.8, 0.38), 700),
 }
+BACKING = ((0.025, 0.03, 0.04), (0.008, 0.01, 0.014))  # diffuse, emissive of the dark plate
+# Antialiasing: Pillow draws each colour with smooth coverage. Pixels at least half covered go to the
+# colour's layer; partly covered ones (SOFT_MIN..half) to a "<name>Soft" layer in the colour blended
+# halfway into the backing, so glyph and plot edges get an intermediate step instead of a hard cut.
+SOFT_MIN, SOFT_MIX = 48, 0.5
+
+
+def _mix(a, b, k: float) -> tuple:
+    return tuple(float(x) * k + float(y) * (1 - k) for x, y in zip(a, b))
+
+
+SOFT_LAYERS = {f"{name}Soft": (_mix(color, BACKING[0], SOFT_MIX), _mix(emissive, BACKING[1], SOFT_MIX), budget)
+               for name, (color, emissive, budget) in LAYERS.items()}
+ALL_LAYERS = {**LAYERS, **SOFT_LAYERS}  # every quad mesh of the panel
 COLS = (8, 138, 268)  # column x [px]
 VALUE_DX = 62  # value column inside a column [px]
 ROW0, ROW_H = 52, 16
@@ -210,18 +224,22 @@ class MonitorRenderer:
     def rects(self, v: dict, history: list[Sample] | None = None) -> dict[str, np.ndarray]:
         """Panel-local rectangles per layer, (n, 4) float32 [x0, y0, x1, y1] in metres."""
         out = {}
-        for name, img in self.draw(v, history).items():
-            r = _mask_rects(np.asarray(img) >= 128)
-            budget = LAYERS[name][2]
-            r = np.asarray(r[:budget], dtype=np.float32).reshape(-1, 4)
-            # pixel (x right, y down) -> panel metres (x right, y up), centred
-            m = np.empty_like(r)
-            m[:, 0] = r[:, 0] * PX_M - PANEL_W / 2
-            m[:, 2] = r[:, 2] * PX_M - PANEL_W / 2
-            m[:, 1] = PANEL_H / 2 - r[:, 3] * PX_M
-            m[:, 3] = PANEL_H / 2 - r[:, 1] * PX_M
-            out[name] = m
+        for base, img in self.draw(v, history).items():
+            cover = np.asarray(img)
+            for name, mask in ((base, cover >= 128), (f"{base}Soft", (cover >= SOFT_MIN) & (cover < 128))):
+                out[name] = self._to_panel(_mask_rects(mask), ALL_LAYERS[name][2])
         return out
+
+    @staticmethod
+    def _to_panel(rects, budget: int) -> np.ndarray:
+        """Pixel rectangles (x right, y down) -> panel metres (x right, y up, centred), capped at budget."""
+        r = np.asarray(rects[:budget], dtype=np.float32).reshape(-1, 4)
+        m = np.empty_like(r)
+        m[:, 0] = r[:, 0] * PX_M - PANEL_W / 2
+        m[:, 2] = r[:, 2] * PX_M - PANEL_W / 2
+        m[:, 1] = PANEL_H / 2 - r[:, 3] * PX_M
+        m[:, 3] = PANEL_H / 2 - r[:, 1] * PX_M
+        return m
 
     def frame_message(self, v: dict, history: list[Sample] | None = None) -> dict | None:
         """The changed layers as a toaster_monitor_frame message, or None when nothing changed."""
@@ -271,7 +289,7 @@ def _quads_mesh(name: str, budget: int) -> str:
         int[] faceVertexIndices = [{indices}]
         point3f[] points = [{points}]
         normal3f[] normals = [(0, 0, 1)] (interpolation = "constant")
-        float3[] extent = [({-PANEL_W / 2}, {-PANEL_H / 2}, 0), ({PANEL_W / 2}, {PANEL_H / 2}, {Z + Z_STEP * len(LAYERS)})]
+        float3[] extent = [({-PANEL_W / 2}, {-PANEL_H / 2}, 0), ({PANEL_W / 2}, {PANEL_H / 2}, {Z + Z_STEP * len(ALL_LAYERS)})]
         uniform bool doubleSided = 1
         bool primvars:doNotCastShadows = 1
         uniform token subdivisionScheme = "none"
@@ -302,11 +320,11 @@ def monitor_usda() -> str:
         _box("Stand", -0.006, bottom - STAND_DROP, -0.012, 0.006, bottom, -0.006, "Stand"),
         _box("Foot", -0.05, bottom - STAND_DROP, -0.04, 0.05, bottom - STAND_DROP + 0.004, 0.02, "Stand"),
         _box("Swatch", sx0, sy0, 0.0, sx1, sy1, Z, "Swatch"),
-    ] + [_quads_mesh(name, budget) for name, (_, _, budget) in LAYERS.items()]
-    looks = [_flat_material("Backing", (0.025, 0.03, 0.04), (0.008, 0.01, 0.014)),
+    ] + [_quads_mesh(name, budget) for name, (_, _, budget) in ALL_LAYERS.items()]
+    looks = [_flat_material("Backing", *BACKING),
              _flat_material("Stand", (0.12, 0.12, 0.13), (0, 0, 0)),
              _flat_material("Swatch", (0.93, 0.85, 0.68), (0.4, 0.36, 0.28))]
-    looks += [_flat_material(name, color, emissive) for name, (color, emissive, _) in LAYERS.items()]
+    looks += [_flat_material(name, color, emissive) for name, (color, emissive, _) in ALL_LAYERS.items()]
     body, mats = "\n".join(prims), "\n".join(looks)
     return f'''#usda 1.0
 (
@@ -350,8 +368,8 @@ def monitor_extras(directory: Path, offset, scale: float = 1.0) -> dict:
         x, y = x + grow * x / np.hypot(x, y), y + grow * y / np.hypot(x, y)
     return {
         "layer": str(write_layer(directory)),
-        "layers": {name: budget for name, (_, _, budget) in LAYERS.items()},
-        "z": {name: Z + i * Z_STEP for i, name in enumerate(LAYERS)},
+        "layers": {name: budget for name, (_, _, budget) in ALL_LAYERS.items()},
+        "z": {name: Z + i * Z_STEP for i, name in enumerate(ALL_LAYERS)},
         # panel centre in the toaster frame (z: above the desk top, which is the toaster's z = 0)
         "offset": [x, y, stand + (STAND_DROP + PANEL_H / 2) * scale],
         "scale": float(scale),
@@ -384,12 +402,14 @@ def _preview() -> None:
     dt = time.perf_counter() - t0
     img = Image.new("RGB", (W_PX, H_PX), (6, 8, 10))
     for name, layer in mon.draw(v).items():
-        color = tuple(int(c * 255) for c in LAYERS[name][0])
-        img.paste(Image.new("RGB", img.size, color), mask=layer.point(lambda p: 255 if p >= 128 else 0))
+        for layer_name, keep in ((name, lambda p: 255 if p >= 128 else 0),
+                                 (f"{name}Soft", lambda p: 255 if SOFT_MIN <= p < 128 else 0)):
+            color = tuple(int(c * 255) for c in ALL_LAYERS[layer_name][0])
+            img.paste(Image.new("RGB", img.size, color), mask=layer.point(keep))
     out = PROJECT_ROOT / ".cache" / "toaster_monitor.png"
     out.parent.mkdir(exist_ok=True)
     img.resize((W_PX * 2, H_PX * 2), Image.NEAREST).save(out)
-    print("render", f"{dt * 1000:.0f} ms", {n: (len(r), LAYERS[n][2]) for n, r in rects.items()}, "->", out)
+    print("render", f"{dt * 1000:.0f} ms", {n: (len(r), ALL_LAYERS[n][2]) for n, r in rects.items()}, "->", out)
     sim.close()
 
 
