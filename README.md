@@ -11,6 +11,8 @@ in front of you. Then **grab it and throw it**.
 | [Wit.ai](https://wit.ai) | Speech-to-intent. This is the service Meta's Voice SDK wraps (see "Why not the Unity Voice SDK") |
 
 The C++ app with ovphysx (PhysX) is the main version, and the all-Python app with Newton came first.
+A third, the [Newton edition](newton_app/README.md), runs the same content on one ovstage with
+[ovnewton](https://github.com/NVIDIA-Omniverse/ovnewton) building the Newton model from the stage.
 These libraries are pre-release, so the versions in `pyproject.toml` are pinned on purpose.
 
 ## Documentation
@@ -19,6 +21,8 @@ These libraries are pre-release, so the versions in `pyproject.toml` are pinned 
   Download it and open it in a browser.
 - [Article draft](docs/medium-article.md): the libraries, SimReady, and the pitfalls along the way.
 - [Native app](cpp/README.md): build steps and the per-frame loop.
+- [Newton edition](newton_app/README.md): ovxr + ovrtx + ovstage + ovnewton in one Python process,
+  what ovnewton needed changed, and its [validation report](newton_app/VALIDATION.md).
 
 ## Agent skills
 
@@ -117,6 +121,7 @@ start in seconds. You can also type commands into the console (`add a mug`, `spa
 | **B** | Undo the last spawn |
 | **Y** | Clear all props |
 | "cancel" / × on the panel | Stop a running download (C++ app) |
+| "realign" / "recenter the room" | Move the scene so your head is at the seat, facing the desk (C++ app) |
 
 Haptics: a short tick when grabbing or spawning, and a long buzz when no asset matched what you said.
 
@@ -133,6 +138,13 @@ They are wired to the toaster through the ovfmi USD-FMI binding in its USD layer
 | **Grip** on the dial, twist | Browning level 1 to 7 (45° per level, 60 to 200 s) |
 | **Trigger** with the controller at the CANCEL button | Stop the cycle. The lever pops up |
 | "new toast" / "reset the toaster" | A fresh, untoasted slice and a cold toaster |
+| **Menu** (left controller) | Show or hide the FMU monitor beside the toaster |
+
+The FMU monitor stands on the desk next to the toaster and turns toward you. It shows the live values
+and states of all three FMUs (ECU state, level, time left, heater, latch, eject; chamber temperature,
+browning, toast colour; toast mode, carriage, height, tumble) and two 60 s plots. It is quad meshes
+like the info panel (`vrsim/toaster_monitor.py`), redrawn about three times a second while shown.
+Offscreen check: `uv run python tests/render_toaster_monitor.py`.
 
 When the timer runs out, the latch lets go, the toast shoots out, tumbles, and lands flat on the desk
 in front of the laptop. Its colour comes from the thermal model's browning. Push the lever again
