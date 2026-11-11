@@ -53,7 +53,8 @@ keep the C++ app's behaviour):
 | `--toast-seconds` (`VRSIM_TOAST_SECONDS`) | 10 | a toasting cycle takes this many real seconds, whatever the dial level; 0 = the FMUs' 60–200 s |
 | `--eject-height` (`VRSIM_EJECT_HEIGHT`) | 0.9 | how high the toast rises above the slot [m], landing on the same spot; 0 = authored 0.46 m |
 | `--no-new-toast` (`VRSIM_NEW_TOAST`) | on | after the toast lands it stays on the desk as a grabbable copy and a fresh slice goes into the slot |
-| `--monitor-scale` (`VRSIM_MONITOR_SCALE`) | 2 | size of the FMU monitor panel |
+| `--monitor-scale` (`VRSIM_MONITOR_SCALE`) | 2 | size of the FMU monitor panel (text antialiased) |
+| `--monitor-offset` (`VRSIM_MONITOR_OFFSET`) | -0.313,-0.24,0.186 | monitor position `x,y[,h]` in the toaster frame (+x toward the seat), standing on a surface `h` above the toaster's base: the book stack |
 
 Prerequisites, Wit.ai and Hugging Face tokens and the microphone are set up as for the C++ app
 (repository README). This app needs no build step.

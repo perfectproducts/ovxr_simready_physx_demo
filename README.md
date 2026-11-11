@@ -6,14 +6,21 @@ in front of you. Then **grab it and throw it**.
 | Piece | Used for |
 |---|---|
 | [ovxr](https://github.com/NVIDIA-Omniverse/ovxr) + ovrtx + ovstage | RTX rendering to the headset over OpenXR, plus the shared scene |
-| [Newton](https://github.com/newton-physics/newton) (XPBD, GPU) | Rigid-body physics: colliders and mass come from each asset's USD physics |
+| [Newton](https://github.com/newton-physics/newton) (XPBD, GPU) + [ovnewton](https://github.com/NVIDIA-Omniverse/ovnewton) | Rigid-body physics: colliders and mass come from each asset's USD physics; ovnewton builds the model straight from the ovstage |
+| [ovphysx](https://github.com/NVIDIA-Omniverse/PhysX/tree/main/ovphysx) (PhysX) | The C++ app's physics, simulating the same ovstage |
 | SimReady repos on Hugging Face | The asset catalog, downloaded on demand |
 | [Wit.ai](https://wit.ai) | Speech-to-intent. This is the service Meta's Voice SDK wraps (see "Why not the Unity Voice SDK") |
 
-The C++ app with ovphysx (PhysX) is the main version, and the all-Python app with Newton came first.
-A third, the [Newton edition](newton_app/README.md), runs the same content on one ovstage with
-[ovnewton](https://github.com/NVIDIA-Omniverse/ovnewton) building the Newton model from the stage.
-These libraries are pre-release, so the versions in `pyproject.toml` are pinned on purpose.
+Three apps share the content (catalog, voice, browser, HUD, the smart toaster and its FMUs):
+
+| App | Physics | Where | Status |
+|---|---|---|---|
+| **C++ app** | ovphysx (PhysX) | `cpp/` + Python sidecar `vrsim/sidecar.py` | headset-tested, 72 fps Minimal |
+| **Newton edition** | Newton through ovnewton, one ovstage for everything | [`newton_app/`](newton_app/README.md) | headset-tested, 30–36 fps |
+| all-Python app (the first one) | Newton, parsing USD itself | `vrsim/app.py` | superseded |
+
+These libraries are pre-release, so the versions in `pyproject.toml` (and `newton_app/pyproject.toml`)
+are pinned on purpose.
 
 ## Documentation
 
@@ -97,7 +104,18 @@ It opens the sidecar (voice, catalog, downloads) in its own window, waits for it
 port 47800, then starts `cpp\build\vrsim_cpp.exe`. Extra arguments go to the exe, and
 `VRSIM_MIC` selects another microphone. Build the exe first with `cpp\scripts\build.bat`.
 
-The all-Python version (Newton physics) runs with:
+The **Newton edition** has its own environment and launcher (see [newton_app/README.md](newton_app/README.md)):
+
+```powershell
+cd newton_app
+uv sync
+.\start_newton_vr.bat       # Minimal rendering; ".\start_newton_vr.bat rt2" for RT2
+```
+
+Its sidecar listens on port 47801, so it can run next to the C++ app's. Start Quest Link before the
+app: an app started first does not see a headset that appears later.
+
+The first all-Python version (Newton physics) runs with:
 
 ```powershell
 uv run python -m vrsim
@@ -121,11 +139,13 @@ start in seconds. You can also type commands into the console (`add a mug`, `spa
 | **B** | Undo the last spawn |
 | **Y** | Clear all props |
 | "cancel" / × on the panel | Stop a running download (C++ app) |
-| "realign" / "recenter the room" | Move the scene so your head is at the seat, facing the desk (C++ app) |
+| "realign" / "recenter the room" | Move the scene so your head is at the seat, facing the desk |
+| **A + X** together (Newton edition) | Recenter: the desk in front of where you look |
+| **Thumbstick click** | Open or close the SimReady catalog browser; point and pull the trigger on a tile to add it, flick the stick to page |
 
 Haptics: a short tick when grabbing or spawning, and a long buzz when no asset matched what you said.
 
-### Smart toaster (C++ app)
+### Smart toaster
 
 A toaster stands at the front left of the Studierstube desk, fixed in place, with a toast in slot 1.
 It is the dbeyond demonstrator's smart toaster (`assets/dbeyond`, see its README): the NVIDIA SimReady
@@ -140,10 +160,12 @@ They are wired to the toaster through the ovfmi USD-FMI binding in its USD layer
 | "new toast" / "reset the toaster" | A fresh, untoasted slice and a cold toaster |
 | **Menu** (left controller) | Show or hide the FMU monitor beside the toaster |
 
-The FMU monitor stands on the desk next to the toaster and turns toward you. It shows the live values
+The FMU monitor stands on the desk next to the toaster (the Newton edition: on the book stack behind
+it) and turns toward you. It shows the live values
 and states of all three FMUs (ECU state, level, time left, heater, latch, eject; chamber temperature,
 browning, toast colour; toast mode, carriage, height, tumble) and two 60 s plots. It is quad meshes
-like the info panel (`vrsim/toaster_monitor.py`), redrawn about three times a second while shown.
+like the info panel (`vrsim/toaster_monitor.py`), redrawn about three times a second while shown; the
+text is antialiased with a second, blended quad layer per colour for partly covered pixels.
 Offscreen check: `uv run python tests/render_toaster_monitor.py`.
 
 When the timer runs out, the latch lets go, the toast shoots out, tumbles, and lands flat on the desk
@@ -151,9 +173,21 @@ in front of the laptop. Its colour comes from the thermal model's browning. Push
 to put it back in the slot. Undo and "clear all" leave the toaster alone. `VRSIM_TOASTER=none`
 turns it off, and `vrsim.config.ToasterConfig` sets where it stands.
 
+`ToasterConfig` also holds settings that default to the behaviour above (real time, authored flight)
+and that the Newton edition's sidecar turns on for VR (environment variables in brackets):
+
+| Setting | Newton edition | Effect |
+|---|---|---|
+| `toast_seconds` (`VRSIM_TOAST_SECONDS`) | 10 | a cycle takes this many real seconds at any dial level; the FMUs run faster while the heater is on |
+| `eject_height` (`VRSIM_EJECT_HEIGHT`) | 0.9 | the toast rises this high above the slot [m] (authored 0.46 m) and lands on the same spot |
+| `new_toast_after_eject` (`VRSIM_NEW_TOAST`) | on | the landed toast stays on the desk as a grabbable copy, a fresh slice goes into the slot |
+| `monitor_scale` (`VRSIM_MONITOR_SCALE`) | 2 | size of the FMU monitor |
+| `monitor_offset` (`VRSIM_MONITOR_OFFSET`) | on the books | monitor position `x,y[,h]` in the toaster frame; `h` = height of the surface it stands on |
+
 The sidecar (`vrsim/toaster.py`) reads the binding, steps the FMUs with FMPy at 100 Hz in real
-time, and routes their values. The app measures the lever, dial and button joints from the PhysX body
-poses, then applies the outputs it gets back: the latch, the toast pose and colour, and the glow.
+time, and routes their values. The app measures the lever, dial and button joints from the body
+poses (PhysX or Newton), then applies the outputs it gets back: the latch, the toast pose and colour,
+and the glow.
 Offline: `uv run python -m vrsim.toaster` runs the dbeyond 600 s scripted user in a few seconds.
 
 ### Voice feedback panel
@@ -211,6 +245,10 @@ vrsim/
   xr_input.py   OpenXR actions on ovxr's borrowed session (pyopenxr ctypes)
   voice.py      push-to-talk capture, Wit.ai /speech, command parser, console input
   toaster.py    dbeyond smart toaster: ovfmi binding -> FMPy co-simulation, app protocol
+  toaster_monitor.py  the FMU monitor panel: Pillow -> merged quads per colour (+ antialiasing layers)
+  sidecar.py    voice, catalog, downloads, browser pages, HUD text and toaster FMUs for the apps
+cpp/                      the C++ app (ovxr + ovrtx + ovstage + ovphysx), see cpp/README.md
+newton_app/               the Newton edition (vrnx package, own uv project), see newton_app/README.md
 tests/smoke_headless.py   catalog -> physics -> grab -> throw, no headset needed
 tests/toaster_physics.py  toaster on the desk in ovphysx: lever push, spring, latch, dial, FMU loop
 tests/render_toaster.py   toaster offscreen: toast pose, colour and slot glow writes reach ovrtx
@@ -233,6 +271,10 @@ assets/dbeyond/           smart toaster product, toast, FMUs, VR station layer (
   `vrsim_cpp` run without a headset, where the toaster spawns and the co-simulation starts.
   ❌ **Not yet tried in the headset:** grabbing the lever and dial, the cancel poke, the Minimal-mode
   glow brightness (`kGlowEmission`).
+- ✅ **Newton edition in the headset:** controllers, A + X recentering, voice, the catalog, and the
+  toaster (lever latch and spring return, 10 s cycles, higher eject, fresh toast, monitor on the
+  books). It runs at half rate, ~36 fps Minimal and ~30 fps RT2. Headless and offscreen tests and the
+  validation report: [newton_app/VALIDATION.md](newton_app/VALIDATION.md).
 - Developed and measured on one machine only (RTX 6000 Ada, Windows 11).
 
 ## Known limitations
@@ -248,6 +290,11 @@ assets/dbeyond/           smart toaster product, toast, FMUs, VR station layer (
   `SUN_INTENSITY`). The Kit-typical 1000+ washes everything out to flat grey.
 - With Link active, pass `--mic` with the headset microphone. Otherwise the Windows default
   input is used (on this machine, a HyperX Quadcast).
+- Downloads use an IPv4 Hugging Face client with a 10 s connect timeout (`vrsim/catalog.py`):
+  huggingface.co publishes IPv6 addresses, and where IPv6 is unreachable the stock client stalled
+  without a timeout and blocked every later spawn.
+- The Newton edition reaches only half the Quest's 72 Hz (rendering 14–16 ms plus physics and Python
+  per frame), and a spawn freezes frames for 0.5–1 s while Newton rebuilds.
 
 ## License
 
