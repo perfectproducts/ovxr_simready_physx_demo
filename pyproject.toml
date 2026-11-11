@@ -17,6 +17,7 @@ dependencies = [
     "pillow>=13.0.0",
     "physx-usd-schemas==25.11.2.72696984",
     "ovphysx==0.7.0.74035321",
+    "fmpy>=0.3.32",
 ]
 
 [tool.uv]

@@ -1,0 +1,74 @@
+#usda 1.0
+(
+    doc = """ECU overlay for the NVIDIA SimReady toaster appliance_toaster_a01.
+Adds what the asset does not have (heater glow, chamber state, display) and the joint-state /
+drive attributes the FMUs read and write. The SimReady source is never edited."""
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "Toaster"
+{
+    over "Joints"
+    {
+        # Lever: sensor = joint position, actuator = drive target (latch).
+        # The asset authors targetPosition = 0.146, outside the joint limits; we start released.
+        over "joint_lever_joint_00" (
+            prepend apiSchemas = ["PhysicsJointStateAPI:linear"]
+        )
+        {
+            float state:linear:physics:position = -0.0005
+            float drive:linear:physics:targetPosition = -0.0005
+            # carriage spring: the SimReady 0.8 N/m cannot hold the 11 g lever up. 60 N/m pushes back
+            # with 3.5 N at the bottom; damping near critical so it pops up without ringing.
+            float drive:linear:physics:stiffness = 60
+            float drive:linear:physics:damping = 1.5
+        }
+
+        # Dial: unlimited revolute joint; the ECU decodes 45 degree bands into levels 1..7.
+        over "joint_dial_joint_00" (
+            prepend apiSchemas = ["PhysicsJointStateAPI:angular"]
+        )
+        {
+            float state:angular:physics:position = 150
+        }
+
+        # Cancel button: 3 mm prismatic travel.
+        over "joint_cancel_button_joint_00" (
+            prepend apiSchemas = ["PhysicsJointStateAPI:linear"]
+        )
+        {
+            float state:linear:physics:position = -0.0002
+        }
+    }
+
+    def Scope "ToasterECU"
+    {
+        # Shared state between the ECU FMU and the thermal FMU.
+        def Xform "Chamber"
+        {
+            custom double toaster:temperature = 20
+            custom double toaster:heaterPower = 0
+            custom double toaster:browning = 0
+            custom double toaster:eject = 0
+        }
+
+        # Orange glow inside the slots, intensity driven by the ECU FMU.
+        def RectLight "HeaterGlow"
+        {
+            float inputs:width = 0.2
+            float inputs:height = 0.03
+            float inputs:intensity = 0
+            color3f inputs:color = (1, 0.38, 0.08)
+            # a RectLight emits along -Z: turned over so it shines up out of the slots
+            double3 xformOp:translate = (0, 0, 0.16)
+            float3 xformOp:rotateXYZ = (180, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+        }
+
+        def Xform "Display"
+        {
+            custom double toaster:timeRemaining = 0
+        }
+    }
+}

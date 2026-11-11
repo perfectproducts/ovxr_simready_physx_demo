@@ -91,6 +91,22 @@ ovxr 0.1, ovphysx 0.7, Newton/Warp current, Meta Horizon Link runtime.
   Joints in nvidia/simready-assets are mostly standalone PxJoints (eyeglasses, waste bin, blue box,
   ratchet). Articulated ones (compressor) aren't covered: RIGID_BODY queries skip articulation links.
   Python ovphysx: `write_sync` prefetches its groups into `session.groups` (`fetch_next` then returns None).
+- **Light parts under strong drives can't be velocity-driven.** A velocity written once per frame
+  is gone within the frame when the drive's acceleration dwarfs it. The SimReady toaster lever
+  (11 g on a 60 N/m spring, near-critical damping) didn't move at all under the grip drive, and
+  the dial's damping stopped it at once. Fix it in a VR overlay layer: body `MassAPI` mass
+  (overrides the colliders' sum), a preloaded spring (target past the top stop), light damping,
+  `targetVelocity = 0`. Hold frictionless unbalanced parts (dial) at their last angle in the app.
+  Check with ovphysx headless before the headset (`tests/toaster_physics.py`).
+  Holds against a spring must be re-aimed **before every physics step**, not once per frame: at
+  36 fps (1-3 steps per frame) a once-per-frame latch let the lever jump over 13 mm and the toast
+  riding on it jittered; per step it sits still.
+- A body's bounding sphere often contains its jointed parts, so prefer a movable part the grip is
+  at (`kPartReach`) over the nearest-gap body, or the housing steals every grab.
+- FMU-driven devices: the sidecar runs the FMUs (FMPy) from the asset's ovfmi binding and the app
+  sends joint readings and applies the outputs (`vrsim/toaster.py`). Material inputs
+  (`inputs:diffuseColor`, `inputs:emissiveColor`) and light `inputs:intensity` update live through
+  plain ovstage float writes (`Stage::writeFloats`).
 - Step on a fixed 1/72 s with substeps (144 Hz scene) and use wall-clock dt only for UI animation.
 
 ## 5. Voice and catalog

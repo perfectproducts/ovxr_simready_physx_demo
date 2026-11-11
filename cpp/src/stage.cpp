@@ -248,4 +248,29 @@ void Stage::writePoints(const std::string& prim, const std::vector<float>& xyz, 
               "write points");
 }
 
+void Stage::writeFloats(const std::string& prim, const char* attribute, const std::vector<float>& values,
+                        ovstage_ordinal_t ordinal)
+{
+    if (values.empty())
+        return;
+    auto it = m_namedLists.find(prim);
+    if (it == m_namedLists.end())
+        it = m_namedLists.emplace(prim, pathList({ prim })).first;
+    int64_t rows = 1;
+    DLTensor t{};
+    t.data = const_cast<float*>(values.data());
+    t.device.device_type = kDLCPU;
+    t.ndim = 1;
+    t.shape = &rows;
+    t.dtype = { kDLFloat, 32, static_cast<uint16_t>(values.size()) };
+    ovstage_write_data_t d{};
+    d.tensors = &t;
+    d.tensor_count = 1;
+    d.is_array = false;
+    d.attribute_mode = OVSTAGE_ATTRIBUTE_MODE_FORCE;
+    waitStage(m_stage,
+              ovstage_write_attribute(m_stage, queryFor(it->second), name(attribute), ordinal, d, OVSTAGE_PRIM_MODE_UPSERT),
+              "write floats");
+}
+
 } // namespace vrsim

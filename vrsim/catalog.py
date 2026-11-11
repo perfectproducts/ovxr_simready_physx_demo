@@ -39,6 +39,34 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
+
+def _hub_client_with_timeouts() -> None:
+    """huggingface_hub (2.x) builds its HTTP client with ``timeout=None`` and tries huggingface.co's
+    IPv6 addresses first. On a network without working IPv6 each of the eight addresses has to time
+    out before IPv4 is tried; without a timeout one stalled connect hung both sidecar spawn workers
+    for good, and every later catalog pick queued behind them. This client connects over IPv4 and
+    fails a dead connection after 10 s (a read may pause 60 s; downloads keep streaming)."""
+    try:
+        import httpx2
+        import huggingface_hub
+        from huggingface_hub.utils import _http
+    except ImportError:
+        return  # older hub: requests-based, with its own timeouts
+    factory = getattr(huggingface_hub, "set_client_factory", None)
+    hook = getattr(_http, "hf_request_event_hook", None)
+    if factory is None or hook is None:
+        return
+
+    def client():
+        return httpx2.Client(event_hooks={"request": [hook]}, follow_redirects=True,
+                             timeout=httpx2.Timeout(60.0, connect=10.0),
+                             transport=httpx2.HTTPTransport(local_address="0.0.0.0"))  # IPv4
+
+    factory(client)
+
+
+_hub_client_with_timeouts()
+
 PACKAGE_MANIFEST = "com.nvidia.simready.packaging.json"
 USD_EXTS = (".usd", ".usda", ".usdc", ".usdz")
 INDEX_VERSION = 2
