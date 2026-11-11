@@ -53,6 +53,9 @@ public:
                          ovstage_ordinal_t ordinal);
     // Overwrite a mesh's points (fixed element count) at `ordinal`.
     void writePoints(const std::string& prim, const std::vector<float>& xyz, ovstage_ordinal_t ordinal);
+    // Overwrite a scalar float (1 value) or a float3/color3f (3 values) attribute of one prim.
+    void writeFloats(const std::string& prim, const char* attribute, const std::vector<float>& values,
+                     ovstage_ordinal_t ordinal);
 
 private:
     ovstage_query_handle_t queryFor(ovx_primpath_list_t list);

@@ -1,0 +1,27 @@
+{
+  "fmu": "toast_flight.fmu",
+  "model": "ToasterECU.ToastFlight",
+  "tool": "OpenModelica 1.26.3",
+  "fmi": {
+    "version": "2.0",
+    "type": "CoSimulation",
+    "guid": "{cac52742-9705-410b-88f5-aeb57b5040da}"
+  },
+  "sha256": "a822ea2017c75f9ed06583c35ed4beb39f8c9dd02b5c1373c8fc4d4012273197",
+  "software_version": "1.4.0",
+  "source": "../ToasterECU/source/ToasterECU.mo",
+  "owner": "simulation team",
+  "variables": {
+    "inputs": [
+      "eject",
+      "lever_pos"
+    ],
+    "outputs": [
+      "toast_rot",
+      "toast_x",
+      "toast_y",
+      "toast_z",
+      "toast_mode"
+    ]
+  }
+}

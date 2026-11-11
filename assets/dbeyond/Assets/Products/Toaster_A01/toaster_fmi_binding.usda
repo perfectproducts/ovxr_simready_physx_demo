@@ -1,0 +1,174 @@
+#usda 1.0
+(
+    doc = """ovfmi binding (USD-FMI schema): FmuInstance -> FmuConnection(fmi:targets) -> FmuMapping.
+fmi:usdMapping = (offset, count) into the USD attribute's components; scalars use (0, 1).
+FMU paths are relative to this layer and resolve inside synctwin://projects/dbeyond through the asset
+resolver; which FMU version is loaded is pinned by the dSimula maturity state."""
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "Toaster"
+{
+    def Scope "Simulation"
+    {
+        # ---- ECU: owned by dbeyond / dSimula ----
+        def FmuInstance "ToasterECU"
+        {
+            asset fmi:fmu = @../../../FMUs/ToasterECU/toaster_ctrl.fmu@
+            bool fmi:enabled = true
+
+            def FmuConnection "Lever"
+            {
+                rel fmi:targets = </Toaster/Joints/joint_lever_joint_00>
+
+                def FmuMapping "position"
+                {
+                    string fmi:fmuAttribute = "lever_pos"
+                    string fmi:usdAttribute = "state:linear:physics:position"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "latch"
+                {
+                    string fmi:fmuAttribute = "lever_target"
+                    string fmi:usdAttribute = "drive:linear:physics:targetPosition"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Dial"
+            {
+                rel fmi:targets = </Toaster/Joints/joint_dial_joint_00>
+
+                def FmuMapping "angle"
+                {
+                    string fmi:fmuAttribute = "dial_angle"
+                    string fmi:usdAttribute = "state:angular:physics:position"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "CancelButton"
+            {
+                rel fmi:targets = </Toaster/Joints/joint_cancel_button_joint_00>
+
+                def FmuMapping "position"
+                {
+                    string fmi:fmuAttribute = "cancel_pos"
+                    string fmi:usdAttribute = "state:linear:physics:position"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Chamber"
+            {
+                rel fmi:targets = </Toaster/ToasterECU/Chamber>
+
+                def FmuMapping "temperature"
+                {
+                    string fmi:fmuAttribute = "chamber_temp"
+                    string fmi:usdAttribute = "toaster:temperature"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "heaterPower"
+                {
+                    string fmi:fmuAttribute = "heater_power"
+                    string fmi:usdAttribute = "toaster:heaterPower"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "eject"
+                {
+                    string fmi:fmuAttribute = "eject"
+                    string fmi:usdAttribute = "toaster:eject"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "HeaterGlow"
+            {
+                rel fmi:targets = </Toaster/ToasterECU/HeaterGlow>
+
+                def FmuMapping "intensity"
+                {
+                    string fmi:fmuAttribute = "heater_glow"
+                    string fmi:usdAttribute = "inputs:intensity"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Display"
+            {
+                rel fmi:targets = </Toaster/ToasterECU/Display>
+
+                def FmuMapping "timeRemaining"
+                {
+                    string fmi:fmuAttribute = "time_remaining"
+                    string fmi:usdAttribute = "toaster:timeRemaining"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+        }
+
+        # ---- Thermal model: owned by the simulation team / customer pipeline ----
+        def FmuInstance "ToasterThermal"
+        {
+            asset fmi:fmu = @../../../FMUs/ToasterThermal/toaster_thermal.fmu@
+            bool fmi:enabled = true
+
+            # Carriage = lever: the toast only browns while it is down in the slot.
+            def FmuConnection "Carriage"
+            {
+                rel fmi:targets = </Toaster/Joints/joint_lever_joint_00>
+
+                def FmuMapping "position"
+                {
+                    string fmi:fmuAttribute = "lever_pos"
+                    string fmi:usdAttribute = "state:linear:physics:position"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Chamber"
+            {
+                rel fmi:targets = </Toaster/ToasterECU/Chamber>
+
+                def FmuMapping "heaterPower"
+                {
+                    string fmi:fmuAttribute = "heater_power"
+                    string fmi:usdAttribute = "toaster:heaterPower"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "temperature"
+                {
+                    string fmi:fmuAttribute = "chamber_temp"
+                    string fmi:usdAttribute = "toaster:temperature"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "browning"
+                {
+                    string fmi:fmuAttribute = "browning"
+                    string fmi:usdAttribute = "toaster:browning"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+        }
+    }
+}

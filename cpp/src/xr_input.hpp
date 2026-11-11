@@ -1,6 +1,6 @@
 // Controller input on the OpenXR session ovxr owns (borrowed handles; we create only our own
 // action set, action spaces and a VIEW space). Same bindings as the Python app:
-//   squeeze grab/throw · trigger pointer ray · A/X push-to-talk · B undo · Y clear
+//   squeeze grab/throw · trigger pointer ray · A/X push-to-talk · B undo · Y clear · left menu: toaster monitor
 #pragma once
 
 #include "common.hpp"
@@ -24,6 +24,7 @@ struct HandInput
     bool primaryPressed = false, primaryReleased = false, secondaryPressed = false;
     float thumbX = 0;
     bool thumbClickPressed = false;
+    bool menuPressed = false;  // left controller only (the right one's is the system button)
 };
 
 struct InputFrame
@@ -74,11 +75,11 @@ private:
     XrActionSet m_set = XR_NULL_HANDLE;
     XrAction m_gripPose = XR_NULL_HANDLE, m_aimPose = XR_NULL_HANDLE, m_squeeze = XR_NULL_HANDLE,
              m_trigger = XR_NULL_HANDLE, m_primary = XR_NULL_HANDLE, m_secondary = XR_NULL_HANDLE,
-             m_hapticOut = XR_NULL_HANDLE, m_thumb = XR_NULL_HANDLE, m_thumbClick = XR_NULL_HANDLE;
+             m_hapticOut = XR_NULL_HANDLE, m_thumb = XR_NULL_HANDLE, m_thumbClick = XR_NULL_HANDLE, m_menu = XR_NULL_HANDLE;
     std::array<XrPath, 2> m_hands{};
     std::array<XrSpace, 2> m_gripSpaces{}, m_aimSpaces{};
     XrSpace m_view = XR_NULL_HANDLE;
-    std::array<bool, 2> m_prevPrimary{}, m_prevSecondary{}, m_prevThumbClick{};
+    std::array<bool, 2> m_prevPrimary{}, m_prevSecondary{}, m_prevThumbClick{}, m_prevMenu{};
 };
 
 } // namespace vrsim

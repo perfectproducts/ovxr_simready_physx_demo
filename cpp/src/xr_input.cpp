@@ -81,6 +81,7 @@ XrInput::XrInput(ovxr_context_t* context, const ovxr_openxr_handles_t& handles)
     m_hapticOut = action("haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT);
     m_thumb = action("thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT);
     m_thumbClick = action("thumbstick_click", XR_ACTION_TYPE_BOOLEAN_INPUT);
+    m_menu = action("menu", XR_ACTION_TYPE_BOOLEAN_INPUT);
 
     std::vector<XrActionSuggestedBinding> touch;
     for (const char* hand : { "left", "right" })
@@ -98,6 +99,7 @@ XrInput::XrInput(ovxr_context_t* context, const ovxr_openxr_handles_t& handles)
     touch.push_back({ m_primary, path("/user/hand/right/input/a/click") });
     touch.push_back({ m_secondary, path("/user/hand/left/input/y/click") });
     touch.push_back({ m_secondary, path("/user/hand/right/input/b/click") });
+    touch.push_back({ m_menu, path("/user/hand/left/input/menu/click") });
     XrInteractionProfileSuggestedBinding suggested{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
     suggested.interactionProfile = path("/interaction_profiles/oculus/touch_controller");
     suggested.suggestedBindings = touch.data();
@@ -189,6 +191,7 @@ InputFrame XrInput::sync(int64_t predictedDisplayTimeNs)
         m_prevPrimary = {};
         m_prevSecondary = {};
         m_prevThumbClick = {};
+        m_prevMenu = {};
         return frame;
     }
     for (int h = 0; h < 2; ++h)
@@ -214,6 +217,9 @@ InputFrame XrInput::sync(int64_t predictedDisplayTimeNs)
         const bool click = boolState(m_thumbClick, h);
         hi.thumbClickPressed = click && !m_prevThumbClick[h];
         m_prevThumbClick[h] = click;
+        const bool menu = boolState(m_menu, h);
+        hi.menuPressed = menu && !m_prevMenu[h];
+        m_prevMenu[h] = menu;
     }
     return frame;
 }

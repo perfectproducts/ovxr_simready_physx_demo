@@ -1,0 +1,42 @@
+[project]
+name = "vr-simready-newton"
+version = "0.1.0"
+description = "Quest 3 VR sandbox on one ovstage: ovxr + ovrtx rendering, Newton physics through ovnewton, voice-spawned SimReady assets"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    # The Omniverse libraries are pre-release: these builds are the set ovnewton 0.2.1 is qualified
+    # against (it pins ovstage itself) and the one ovxr 0.1 ships with.
+    "ovnewton==0.2.1",
+    "ovstage==0.3.0.1791986420",
+    "ovrtx==0.6.0.1791947691",
+    "ovxr==0.1.0.5842",
+    "newton==1.7.0",
+    "warp-lang>=1.17.0",
+    # Shared content modules (../vrsim): catalog, voice, browser, HUD, toaster FMUs.
+    "pyopenxr",
+    "huggingface_hub",
+    "rapidfuzz",
+    "sounddevice",
+    "numpy",
+    "requests",
+    "pillow>=13.0.0",
+    "fmpy>=0.3.32",
+    "usd-core",
+    "scipy",
+]
+
+[dependency-groups]
+dev = ["pyflakes"]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'", "sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+explicit = true
+
+[tool.uv.sources]
+ovrtx = { index = "nvidia" }
+ovxr = { index = "nvidia" }

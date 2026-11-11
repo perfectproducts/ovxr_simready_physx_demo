@@ -11,6 +11,8 @@ in front of you. Then **grab it and throw it**.
 | [Wit.ai](https://wit.ai) | Speech-to-intent. This is the service Meta's Voice SDK wraps (see "Why not the Unity Voice SDK") |
 
 The C++ app with ovphysx (PhysX) is the main version, and the all-Python app with Newton came first.
+A third, the [Newton edition](newton_app/README.md), runs the same content on one ovstage with
+[ovnewton](https://github.com/NVIDIA-Omniverse/ovnewton) building the Newton model from the stage.
 These libraries are pre-release, so the versions in `pyproject.toml` are pinned on purpose.
 
 ## Documentation
@@ -19,6 +21,8 @@ These libraries are pre-release, so the versions in `pyproject.toml` are pinned 
   Download it and open it in a browser.
 - [Article draft](docs/medium-article.md): the libraries, SimReady, and the pitfalls along the way.
 - [Native app](cpp/README.md): build steps and the per-frame loop.
+- [Newton edition](newton_app/README.md): ovxr + ovrtx + ovstage + ovnewton in one Python process,
+  what ovnewton needed changed, and its [validation report](newton_app/VALIDATION.md).
 
 ## Agent skills
 
@@ -117,8 +121,40 @@ start in seconds. You can also type commands into the console (`add a mug`, `spa
 | **B** | Undo the last spawn |
 | **Y** | Clear all props |
 | "cancel" / × on the panel | Stop a running download (C++ app) |
+| "realign" / "recenter the room" | Move the scene so your head is at the seat, facing the desk (C++ app) |
 
 Haptics: a short tick when grabbing or spawning, and a long buzz when no asset matched what you said.
+
+### Smart toaster (C++ app)
+
+A toaster stands at the front left of the Studierstube desk, fixed in place, with a toast in slot 1.
+It is the dbeyond demonstrator's smart toaster (`assets/dbeyond`, see its README): the NVIDIA SimReady
+toaster plus three FMUs, an OpenModelica ECU, a thermal and browning model, and the toast's flight.
+They are wired to the toaster through the ovfmi USD-FMI binding in its USD layers.
+
+| Input | Action |
+|---|---|
+| **Grip** on the lever, push down | Start toasting. The ECU latches the lever and the heater glows in the slots |
+| **Grip** on the dial, twist | Browning level 1 to 7 (45° per level, 60 to 200 s) |
+| **Trigger** with the controller at the CANCEL button | Stop the cycle. The lever pops up |
+| "new toast" / "reset the toaster" | A fresh, untoasted slice and a cold toaster |
+| **Menu** (left controller) | Show or hide the FMU monitor beside the toaster |
+
+The FMU monitor stands on the desk next to the toaster and turns toward you. It shows the live values
+and states of all three FMUs (ECU state, level, time left, heater, latch, eject; chamber temperature,
+browning, toast colour; toast mode, carriage, height, tumble) and two 60 s plots. It is quad meshes
+like the info panel (`vrsim/toaster_monitor.py`), redrawn about three times a second while shown.
+Offscreen check: `uv run python tests/render_toaster_monitor.py`.
+
+When the timer runs out, the latch lets go, the toast shoots out, tumbles, and lands flat on the desk
+in front of the laptop. Its colour comes from the thermal model's browning. Push the lever again
+to put it back in the slot. Undo and "clear all" leave the toaster alone. `VRSIM_TOASTER=none`
+turns it off, and `vrsim.config.ToasterConfig` sets where it stands.
+
+The sidecar (`vrsim/toaster.py`) reads the binding, steps the FMUs with FMPy at 100 Hz in real
+time, and routes their values. The app measures the lever, dial and button joints from the PhysX body
+poses, then applies the outputs it gets back: the latch, the toast pose and colour, and the glow.
+Offline: `uv run python -m vrsim.toaster` runs the dbeyond 600 s scripted user in a few seconds.
 
 ### Voice feedback panel
 
@@ -174,7 +210,11 @@ vrsim/
   catalog.py    HF index (official catalog + partner crawl), fuzzy search, download
   xr_input.py   OpenXR actions on ovxr's borrowed session (pyopenxr ctypes)
   voice.py      push-to-talk capture, Wit.ai /speech, command parser, console input
+  toaster.py    dbeyond smart toaster: ovfmi binding -> FMPy co-simulation, app protocol
 tests/smoke_headless.py   catalog -> physics -> grab -> throw, no headset needed
+tests/toaster_physics.py  toaster on the desk in ovphysx: lever push, spring, latch, dial, FMU loop
+tests/render_toaster.py   toaster offscreen: toast pose, colour and slot glow writes reach ovrtx
+assets/dbeyond/           smart toaster product, toast, FMUs, VR station layer (copied from dbeyond)
 ```
 
 ## Verification status
@@ -187,6 +227,12 @@ tests/smoke_headless.py   catalog -> physics -> grab -> throw, no headset needed
   ovstage `points` writes into ovrtx and checks that the text appears and changes.
 - ✅ Wit.ai with the real token: synthesized English speech ("Add three mugs", "Clear all
   objects", "Spawn a football", "Undo") is transcribed and parsed correctly with an untrained app.
+- ✅ Toaster, headless: `tests/toaster_physics.py` (ovphysx on the desk: lever pushed to the bottom,
+  spring return, latch hold, dial turn and hold, FMUs latching and heating from measured joints),
+  `tests/render_toaster.py` (runtime toast pose, colour and glow writes in RT2), and a sidecar +
+  `vrsim_cpp` run without a headset, where the toaster spawns and the co-simulation starts.
+  ❌ **Not yet tried in the headset:** grabbing the lever and dial, the cancel poke, the Minimal-mode
+  glow brightness (`kGlowEmission`).
 - Developed and measured on one machine only (RTX 6000 Ada, Windows 11).
 
 ## Known limitations

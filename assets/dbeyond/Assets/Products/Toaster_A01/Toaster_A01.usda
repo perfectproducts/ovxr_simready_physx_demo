@@ -1,0 +1,24 @@
+#usda 1.0
+(
+    doc = """Smart toaster product asset: NVIDIA SimReady appliance_toaster_a01 (unchanged, CC-BY-4.0)
++ ECU overlay (heater glow, chamber, display, joint state) + ovfmi binding to the ECU and thermal FMUs.
+Reference this file from a scenario; relationship targets are remapped onto the referencing prim."""
+    defaultPrim = "Toaster"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+    subLayers = [
+        @./toaster_fmi_binding.usda@,
+        @./toaster_ecu_overlay.usda@
+    ]
+)
+
+def Xform "Toaster" (
+    kind = "component"
+    prepend references = @./simready/simready_usd/sm_appliance_toaster_a01_01.usd@
+    variants = {
+        string PhysX = "Enabled"
+    }
+)
+{
+}

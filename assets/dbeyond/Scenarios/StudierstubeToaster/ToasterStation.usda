@@ -1,0 +1,256 @@
+#usda 1.0
+(
+    doc = """VR toaster station for the Studierstube desk (vrsim C++ app, ovphysx).
+The smart toaster product (SimReady appliance_toaster_a01 + ECU overlay + ovfmi binding to the ECU and
+thermal FMUs) with one toast in slot 1 and the ToastFlight FMU, as in Scenarios/ToasterDemo, minus the
+counter and the robot: the user works the lever, dial and cancel button with the Quest controllers.
+
+The vrsim sidecar reads the ovfmi binding below (FmuInstance -> FmuConnection -> FmuMapping), steps
+the FMUs with FMPy and routes their values; the app writes the joint positions it measures in physics
+and applies the outputs (latch, toast pose, toast colour, heater glow).
+
+Toaster frame (Z up, metres): z = 0 is the desk top, lever and dial on the +X end, the toast flies
+along +Y and lands flat 0.5 m further. Where it stands on the desk: vrsim.config.ToasterConfig."""
+    defaultPrim = "Toaster"
+    metersPerUnit = 1
+    kilogramsPerUnit = 1
+    upAxis = "Z"
+)
+
+# PhysX variant "Disabled": convex-decomposition colliders instead of the product's SDF choice. The
+# VR app steps on the GPU, where the dbeyond runs saw SDF toaster colliders hang; the joints have
+# collisions off, so the lever never touches its slot anyway.
+def Xform "Toaster" (
+    kind = "component"
+    prepend references = @../../Assets/Products/Toaster_A01/Toaster_A01.usda@
+    variants = {
+        string PhysX = "Disabled"
+    }
+)
+{
+    # ---- hand-operable parts (VR only; the product and its dbeyond overlay stay as they are) ----
+    # The app moves parts with per-frame velocity writes (the controller's grip) and holds the
+    # lever down while the ECU latches the same way. On the SimReady masses (lever 11 g, dial 7.5 g,
+    # button 1.6 g) the authored drives undo any such velocity within one 14 ms frame: the lever's
+    # 60 N/m spring accelerates it at 300 m/s^2 at the bottom, and the dial's damping stops it at
+    # once. So: heavier parts (body MassAPI mass overrides the colliders' sum), a preloaded spring
+    # (target above the top stop, so the 0.2 kg lever still rests up), light damping and no target
+    # velocities. headless check: tests/toaster_physics.py.
+    over "Geometry"
+    {
+        over "lever_obj_01" (
+            prepend apiSchemas = ["PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 0.2
+        }
+
+        over "dial_obj_01" (
+            prepend apiSchemas = ["PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 0.05
+        }
+
+        over "cancel_button_obj_01" (
+            prepend apiSchemas = ["PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 0.02
+        }
+    }
+
+    over "Joints"
+    {
+        over "joint_lever_joint_00"
+        {
+            # 60 N/m x 0.04 m preload = 2.4 N up at the top against 2 N weight; 6 N at the bottom
+            float drive:linear:physics:targetPosition = 0.04
+            float drive:linear:physics:stiffness = 60
+            float drive:linear:physics:damping = 2
+            float drive:linear:physics:targetVelocity = 0
+        }
+
+        over "joint_dial_joint_00"
+        {
+            float drive:angular:physics:damping = 0
+            float drive:angular:physics:targetVelocity = 0
+        }
+
+        over "joint_cancel_button_joint_00"
+        {
+            # pushed back out by its spring: the asset's target lies far outside the 3 mm travel
+            float drive:linear:physics:targetPosition = 0.01
+            float drive:linear:physics:stiffness = 20
+            float drive:linear:physics:damping = 0.05
+            float drive:linear:physics:targetVelocity = 0
+        }
+    }
+
+    # Toast in slot 1. Not a physics body here: its pose comes from the ToastFlight FMU and the app
+    # writes it as a world transform each frame (it rides on the lever, then flies out on the eject).
+    def Xform "Toast" (
+        prepend references = @../../Assets/Products/Toast_Slice/Toast_Slice.usda@
+    )
+    {
+        double3 xformOp:translate = (0, -0.026, 0.17)
+        float3 xformOp:rotateXYZ = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ"]
+    }
+
+    over "ToasterECU"
+    {
+        # Minimal rendering ignores the HeaterGlow RectLight: an emissive strip down in each slot
+        # shows the heater instead. The app scales its emissiveColor with HeaterGlow inputs:intensity.
+        def Xform "SlotGlow"
+        {
+            def Mesh "Slot1" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                float3[] extent = [(-0.065, -0.031, 0.125), (0.065, -0.021, 0.125)]
+                int[] faceVertexCounts = [4]
+                int[] faceVertexIndices = [0, 1, 2, 3]
+                point3f[] points = [(-0.065, -0.031, 0.125), (0.065, -0.031, 0.125), (0.065, -0.021, 0.125), (-0.065, -0.021, 0.125)]
+                normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (interpolation = "vertex")
+                rel material:binding = </Toaster/ToasterECU/SlotGlow/Glow>
+                uniform bool doubleSided = true
+                int primvars:doNotCastShadows = 1
+            }
+
+            def Mesh "Slot2" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                float3[] extent = [(-0.065, 0.021, 0.125), (0.065, 0.031, 0.125)]
+                int[] faceVertexCounts = [4]
+                int[] faceVertexIndices = [0, 1, 2, 3]
+                point3f[] points = [(-0.065, 0.021, 0.125), (0.065, 0.021, 0.125), (0.065, 0.031, 0.125), (-0.065, 0.031, 0.125)]
+                normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (interpolation = "vertex")
+                rel material:binding = </Toaster/ToasterECU/SlotGlow/Glow>
+                uniform bool doubleSided = true
+                int primvars:doNotCastShadows = 1
+            }
+
+            def Material "Glow"
+            {
+                token outputs:surface.connect = </Toaster/ToasterECU/SlotGlow/Glow/Shader.outputs:surface>
+
+                def Shader "Shader"
+                {
+                    uniform token info:id = "UsdPreviewSurface"
+                    color3f inputs:diffuseColor = (0.05, 0.03, 0.02)
+                    color3f inputs:emissiveColor = (0, 0, 0)
+                    float inputs:roughness = 0.9
+                    token outputs:surface
+                }
+            }
+        }
+    }
+
+    over "Simulation"
+    {
+        over "ToasterThermal"
+        {
+            # Browning colour of this toast, one FMU output per colour component.
+            def FmuConnection "ToastColor"
+            {
+                rel fmi:targets = </Toaster/Toast/Looks/ToastMat/Surface>
+
+                def FmuMapping "red"
+                {
+                    string fmi:fmuAttribute = "toast_r"
+                    string fmi:usdAttribute = "inputs:diffuseColor"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "green"
+                {
+                    string fmi:fmuAttribute = "toast_g"
+                    string fmi:usdAttribute = "inputs:diffuseColor"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (1, 1)
+                }
+
+                def FmuMapping "blue"
+                {
+                    string fmi:fmuAttribute = "toast_b"
+                    string fmi:usdAttribute = "inputs:diffuseColor"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (2, 1)
+                }
+            }
+        }
+
+        # Toast carriage and flight: deterministic ballistic arc on the ECU eject pulse.
+        def FmuInstance "ToastFlight"
+        {
+            asset fmi:fmu = @../../FMUs/ToastFlight/toast_flight.fmu@
+            bool fmi:enabled = true
+
+            def FmuConnection "Carriage"
+            {
+                rel fmi:targets = </Toaster/Joints/joint_lever_joint_00>
+
+                def FmuMapping "position"
+                {
+                    string fmi:fmuAttribute = "lever_pos"
+                    string fmi:usdAttribute = "state:linear:physics:position"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Eject"
+            {
+                rel fmi:targets = </Toaster/ToasterECU/Chamber>
+
+                def FmuMapping "eject"
+                {
+                    string fmi:fmuAttribute = "eject"
+                    string fmi:usdAttribute = "toaster:eject"
+                    token fmi:direction = "input"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+
+            def FmuConnection "Toast"
+            {
+                rel fmi:targets = </Toaster/Toast>
+
+                def FmuMapping "x"
+                {
+                    string fmi:fmuAttribute = "toast_x"
+                    string fmi:usdAttribute = "xformOp:translate"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+
+                def FmuMapping "y"
+                {
+                    string fmi:fmuAttribute = "toast_y"
+                    string fmi:usdAttribute = "xformOp:translate"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (1, 1)
+                }
+
+                def FmuMapping "z"
+                {
+                    string fmi:fmuAttribute = "toast_z"
+                    string fmi:usdAttribute = "xformOp:translate"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (2, 1)
+                }
+
+                def FmuMapping "tumble"
+                {
+                    string fmi:fmuAttribute = "toast_rot"
+                    string fmi:usdAttribute = "xformOp:rotateXYZ"
+                    token fmi:direction = "output"
+                    int2 fmi:usdMapping = (0, 1)
+                }
+            }
+        }
+    }
+}
