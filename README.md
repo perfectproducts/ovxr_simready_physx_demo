@@ -140,6 +140,7 @@ start in seconds. You can also type commands into the console (`add a mug`, `spa
 | **Y** | Clear all props |
 | "cancel" / × on the panel | Stop a running download (C++ app) |
 | "realign" / "recenter the room" | Move the scene so your head is at the seat, facing the desk |
+| "help" / "what can I say" | Every voice command on the info panel; page with its ◀ ▶ buttons (trigger) or "next page" / "previous page" |
 | **A + X** together (Newton edition) | Recenter: the desk in front of where you look |
 | **Thumbstick click** | Open or close the SimReady catalog browser; point and pull the trigger on a tile to add it, flick the stick to page |
 
@@ -157,8 +158,16 @@ They are wired to the toaster through the ovfmi USD-FMI binding in its USD layer
 | **Grip** on the lever, push down | Start toasting. The ECU latches the lever and the heater glows in the slots |
 | **Grip** on the dial, twist | Browning level 1 to 7 (45° per level, 60 to 200 s) |
 | **Trigger** with the controller at the CANCEL button | Stop the cycle. The lever pops up |
+| "show the toaster" / "hide the toaster" | The toaster is hidden at start; this puts it on the desk or removes it (with its monitor) |
+| "toggle toaster" (also "turn the toaster on / off", "stop toasting") | Presses the lever when idle, the cancel button while it heats |
 | "new toast" / "reset the toaster" | A fresh, untoasted slice and a cold toaster |
-| **Menu** (left controller) | Show or hide the FMU monitor beside the toaster |
+| **Menu** (left controller) or "toggle signal monitor" ("show / hide the monitor") | Show or hide the FMU monitor beside the toaster (hidden at start) |
+
+When a cycle finishes, the toaster dings in 3D: the sidecar renders the bell binaurally from the head
+pose the app sends (`vrsim/spatial_audio.py`), so it comes from the toaster and moves as you turn.
+The sound is `assets/sounds/ding.wav` (any WAV, mixed to mono; `VRSIM_DING_WAV` names another file),
+or a synthesized bell when there is none. It plays on the default output device (the headset while Link sends audio there); `--speaker NAME`
+or `VRSIM_SPEAKER` picks another. Quick listen without the headset: `uv run python -m vrsim.spatial_audio`.
 
 The FMU monitor stands on the desk next to the toaster (the Newton edition: on the book stack behind
 it) and turns toward you. It shows the live values

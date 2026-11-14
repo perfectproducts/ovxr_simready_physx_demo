@@ -61,6 +61,18 @@ const char* kSpinner = "/World/BrowserLoading/Spinner";
 const char* kAccents[3] = { "/World/HUD/Panel/AccentBusy", "/World/HUD/Panel/AccentOk", "/World/HUD/Panel/AccentError" };
 const char* kRig = "/World/Rig";  // ovxr tracking anchor: world = rig * tracking pose
 const char* kMonitor = "/World/ToasterMonitor";  // vrsim.toaster_monitor panel beside the toaster
+// Info panel placement: (yaw left of the view [deg], drop below the eyes [m]) in order of preference,
+// the first one that doesn't cut through the toaster or its monitor (vrsim.hud FOLLOW_* is the first).
+const std::pair<double, double> kHudSpots[] = { { 35, 0.25 }, { 35, 0.05 }, { 55, 0.25 }, { 55, 0.05 },
+                                                { -35, 0.25 }, { -35, 0.05 }, { 20, -0.1 } };
+const double kHudDistance = 0.85;               // [m] from the head
+const double kEyeHeight = 1.22;  // [m] seated eyes in the world: the 0.78 m desk plus ~0.44 m (VRSIM_EYE_HEIGHT)
+const double kHudHalf[2] = { 0.36, 0.125 };     // [m] vrsim.hud PANEL_W / 2, PANEL_H / 2
+const double kHudNav[2][2] = { { 0.36 - 0.165, -0.125 + 0.024 }, { 0.36 - 0.035, -0.125 + 0.024 } };  // vrsim.hud NAV_PREV / NEXT
+const double kHudNavHalf = 0.018;               // vrsim.hud NAV_HALF
+const double kHudClearance = 0.03;              // [m] gap kept to obstacles
+const double kHudReplaceOverlap = 0.02;         // [m] an anchored panel moves when something reaches this far in
+const double kMonitorSize[2] = { 0.40, 0.30 };  // [m] vrsim.toaster_monitor PANEL_W, PANEL_H
 const Mat16 kHidden = Pose{ { 0, 0, -100 } }.matrix({ 1e-4, 1e-4, 1e-4 });
 
 double seconds(Clock::time_point a, Clock::time_point b)
@@ -263,7 +275,7 @@ struct MonitorPanel
         bool pending = false;
     };
     ovstage_population_usd_reference_handle_t handle = 0;
-    bool on = true;
+    bool on = false;  // hidden until the menu button or "toggle signal monitor"
     std::vector<Layer> layers;
     Vec3 offset{ 0, -0.34, 0.19 };  // panel centre in the toaster frame
     std::string swatch;             // its toast-colour shader
@@ -281,6 +293,7 @@ struct Hud
     Pose pose;              // last placed panel pose (for pointer hits)
     bool visible = false;
     std::array<bool, 2> triggerDown{};
+    bool nav = false;  // the text has page buttons (help): ◀ at kHudNav[0], ▶ at kHudNav[1]
 };
 
 class App
@@ -384,6 +397,11 @@ public:
                 input = m_xr->sync(plan.timing.predicted_display_time_ns);
                 if (input.headValid)
                     m_rawHead = input.head;
+                if (input.headValid && !m_eyesLevelled)  // the first head pose: seated eye height, same spot and heading
+                {
+                    m_eyesLevelled = true;
+                    levelEyes();
+                }
                 toWorld(input);
                 if (input.headValid)
                     m_head = input.head;
@@ -487,6 +505,21 @@ private:
     // "realign": turn and shift the rig so the head stands over the scene's seat spot (the world
     // origin, where config.EnvironmentConfig.offset puts the user) and looks along +Y at the desk.
     // Heading only; the floor stays the floor.
+    // Lift the rig so the eyes are at the seated eye height (it only turns about Z, so world eye z =
+    // rig z + tracking eye z). VRSIM_EYE_HEIGHT overrides it; 0 keeps tracking's own height.
+    void levelEyes()
+    {
+        if (!m_rawHead)
+            return;
+#pragma warning(suppress : 4996)  // read once per recenter, nothing else writes the environment
+        const char* env = std::getenv("VRSIM_EYE_HEIGHT");
+        const double eye = env && *env ? std::atof(env) : kEyeHeight;
+        if (eye <= 0)
+            return;
+        m_rig.p.z = eye - m_rawHead->p.z;
+        logf("Rig: eyes at %.2f m (tracking %.2f m)", eye, m_rawHead->p.z);
+    }
+
     void realign()
     {
         if (!m_rawHead)
@@ -499,6 +532,7 @@ private:
         const Quat q = Quat::axisAngle({ 0, 0, 1 }, 3.14159265358979 / 2 - std::atan2(f.y, f.x));
         const Vec3 head{ m_rawHead->p.x, m_rawHead->p.y, 0 };
         m_rig = Pose{ Vec3{ 0, 0, 0 } - q.rotate(head), q };
+        levelEyes();
         for (Hand& h : m_hands)
             h.history.clear();  // no throw from the jump
         m_hud.pos.reset();      // the info panel settles in front again
@@ -525,12 +559,82 @@ private:
             clear();
         if ((h[0].menuPressed || h[1].menuPressed) && m_monitor.handle)
         {
-            m_monitor.on = !m_monitor.on;
-            m_link.send({ { "t", "toaster_monitor" }, { "on", m_monitor.on } });
+            setMonitor(!m_monitor.on);
             m_xr->haptic(0, 0.3f, 0.03f);
-            if (m_toaster)
-                m_toaster->colorDirty = true;  // repaint the swatch with the panel
         }
+    }
+
+    // Show / hide the toaster's FMU monitor (menu button, or "toggle signal monitor" via the sidecar).
+    void setMonitor(bool on)
+    {
+        if (!m_monitor.handle)
+            return;
+        m_monitor.on = on;
+        m_link.send({ { "t", "toaster_monitor" }, { "on", m_monitor.on } });  // the sidecar starts / stops frames
+        if (m_toaster)
+            m_toaster->colorDirty = true;  // repaint the swatch with the panel
+    }
+
+    // What the info panel must not cut through, as world spheres: the toaster's bodies and, while
+    // shown, its FMU monitor.
+    std::vector<std::pair<Vec3, double>> hudObstacles() const
+    {
+        std::vector<std::pair<Vec3, double>> out;
+        if (!m_toaster)
+            return out;
+        const Toaster& ts = *m_toaster;
+        for (size_t b = 0; b < m_props[ts.prop].bodyPaths.size(); ++b)
+            if (const BodyState* s = bodyState(ts.prop, static_cast<int>(b)))
+                out.push_back(bodySphere(*s, BodyRef{ ts.prop, static_cast<int>(b) }));
+        const BodyState* base = bodyState(ts.prop, ts.base);
+        if (m_monitor.handle && m_monitor.on && base)
+            out.push_back({ (base->pose * Pose{ m_monitor.offset }).p, 0.5 * std::hypot(kMonitorSize[0], kMonitorSize[1]) });
+        return out;
+    }
+
+    // An upright panel at pos facing the head horizontally (as the info panel is drawn).
+    Pose facingHead(const Vec3& pos) const
+    {
+        Vec3 z = m_head->p - pos;
+        z.z = 0;
+        z = z.length() > 1e-3 ? z.normalized() : Vec3{ 0, -1, 0 };
+        const Vec3 up{ 0, 0, 1 }, x = up.cross(z);
+        const double m[16] = { x.x, x.y, x.z, 0, up.x, up.y, up.z, 0, z.x, z.y, z.z, 0, pos.x, pos.y, pos.z, 1 };
+        return Pose::fromMatrix(m);
+    }
+
+    // How far [m] the info panel at pos reaches into the nearest obstacle (<= 0: clear).
+    double hudOverlap(const Vec3& pos, const std::vector<std::pair<Vec3, double>>& obstacles) const
+    {
+        if (obstacles.empty())
+            return -1.0;
+        const Pose inv = facingHead(pos).inverse();
+        double worst = -1.0;
+        for (const auto& [centre, radius] : obstacles)
+        {
+            const Vec3 l = (inv * Pose{ centre }).p;
+            const double dx = std::max(std::abs(l.x) - kHudHalf[0], 0.0), dy = std::max(std::abs(l.y) - kHudHalf[1], 0.0);
+            worst = std::max(worst, radius + kHudClearance - std::sqrt(dx * dx + dy * dy + l.z * l.z));
+        }
+        return worst;
+    }
+
+    // The first clear spot of kHudSpots, or the least blocked one.
+    Vec3 hudTarget(const Vec3& fwd, const std::vector<std::pair<Vec3, double>>& obstacles) const
+    {
+        Vec3 best;
+        double bestOverlap = 1e9;
+        for (const auto& [yaw, drop] : kHudSpots)
+        {
+            const Vec3 side = Quat::axisAngle({ 0, 0, 1 }, yaw * 3.14159265358979 / 180.0).rotate(fwd);
+            const Vec3 pos = m_head->p + side * kHudDistance - Vec3{ 0, 0, drop };
+            const double overlap = hudOverlap(pos, obstacles);
+            if (overlap <= 0.0)
+                return pos;
+            if (overlap < bestOverlap)
+                best = pos, bestOverlap = overlap;
+        }
+        return best;
     }
 
     // A body's bounding sphere in the world; without per-body spheres, the whole prop's.
@@ -1177,7 +1281,10 @@ private:
         if (t - ts.lastSent < 1.0 / 60.0 || !ts.lever.seen)
             return;
         ts.lastSent = t;
-        m_link.send({ { "t", "toaster_in" }, { "lever", ts.lever.value }, { "dial", ts.dial.value }, { "cancel", cancel } });
+        nlohmann::json msg = { { "t", "toaster_in" }, { "lever", ts.lever.value }, { "dial", ts.dial.value }, { "cancel", cancel } };
+        if (m_head)  // world pose of the view: the sidecar's 3D sound (the ding) is heard from here
+            msg["head"] = { m_head->p.x, m_head->p.y, m_head->p.z, m_head->q.x, m_head->q.y, m_head->q.z, m_head->q.w };
+        m_link.send(msg);
     }
 
     bool handHolds(int prop, int body) const
@@ -1311,7 +1418,7 @@ private:
             }
             ts.colorDirty = false;
         }
-        if (m_monitor.on)
+        if (m_monitor.on && m_monitor.handle)  // handle 0: removed with the toaster
             for (MonitorPanel::Layer& l : m_monitor.layers)
                 if (l.pending && l.points.size() == l.budget * 12)
                 {
@@ -1413,20 +1520,23 @@ private:
             fwd.z = 0;
             fwd = fwd.length() > 1e-3 ? fwd.normalized() : Vec3{ 0, 1, 0 };
             // Off to the left (35 deg) and a little low, clear of the catalog and the table
-            // (vrsim.hud FOLLOW_YAW / FOLLOW_DISTANCE / FOLLOW_DROP).
-            const Vec3 side = Quat::axisAngle({ 0, 0, 1 }, 35.0 * 3.14159265358979 / 180.0).rotate(fwd);
-            const Vec3 target = m_head->p + side * 0.85 - Vec3{ 0, 0, 0.25 };
+            // (vrsim.hud FOLLOW_YAW / FOLLOW_DISTANCE / FOLLOW_DROP), unless that cuts through the
+            // toaster or its monitor: then the first clear spot of kHudSpots.
+            const auto obstacles = hudObstacles();
             // World-anchored while visible, so turning to read it (or aim at its X) doesn't push it
-            // away; it is re-placed only when it drifts more than ~70 degrees out of view.
+            // away; it is re-placed only when it drifts more than ~70 degrees out of view, or when
+            // something comes to stand in it (the monitor switched on).
             if (m_hud.pos)
             {
                 Vec3 toPanel = *m_hud.pos - m_head->p;
                 toPanel.z = 0;
                 if (toPanel.length() > 1e-3 && toPanel.normalized().dot(fwd) < std::cos(70.0 * 3.14159265358979 / 180.0))
-                    m_hud.anchor = target;
+                    m_hud.anchor = hudTarget(fwd, obstacles);
+                else if (hudOverlap(m_hud.anchor, obstacles) > kHudReplaceOverlap)
+                    m_hud.anchor = hudTarget(fwd, obstacles);
             }
             else
-                m_hud.anchor = target;
+                m_hud.anchor = hudTarget(fwd, obstacles);
             const double dt = seconds(m_hudLast, now);
             m_hud.pos = m_hud.pos ? *m_hud.pos + (m_hud.anchor - *m_hud.pos) * std::min(1.0, dt * 3.0) : m_hud.anchor;
             Vec3 z = m_head->p - *m_hud.pos;
@@ -1504,6 +1614,13 @@ private:
                 m_xr->haptic(h, 0.4f, 0.03f);
                 m_link.send({ { "t", "hud_closed" } });  // the sidecar cancels a running download
             }
+            else if (pressed && m_hud.nav)
+                for (int i = 0; i < 2; ++i)
+                    if (std::abs(local.x - kHudNav[i][0]) <= kHudNavHalf + 0.012 && std::abs(local.y - kHudNav[i][1]) <= kHudNavHalf + 0.012)
+                    {
+                        m_xr->haptic(h, 0.3f, 0.03f);
+                        m_link.send({ { "t", "hud_page" }, { "delta", i ? 1 : -1 } });
+                    }
         }
     }
 
@@ -1754,6 +1871,10 @@ private:
                 onToaster(msg);
             else if (t == "toaster_monitor_frame")
                 monitorFrame(msg);
+            else if (t == "toaster_monitor")
+                setMonitor(msg.value("on", !m_monitor.on));
+            else if (t == "remove_device")
+                removeDevice(msg.value("device", std::string()));
             else if (t == "realign")
                 realign();
             else if (t == "browser")
@@ -1770,6 +1891,7 @@ private:
                 m_hud.points = decodeBase64Floats(msg.value("points", ""));
                 m_hud.kind = msg.value("kind", "info");
                 m_hud.hold = msg.value("hold", 6.0);
+                m_hud.nav = msg.value("nav", false);
                 m_hud.posted = Clock::now();
                 m_hud.pending = true;
             }
@@ -1914,6 +2036,23 @@ private:
         rebuildBodyMap();
     }
 
+    // Remove a device prop (the toaster: "hide the toaster"), which undo / clear keep, and its monitor.
+    void removeDevice(const std::string& device)
+    {
+        if (device == "toaster" && m_monitor.handle)
+        {
+            // Placed only with the toaster, it would freeze in the air; setupMonitor adds it again.
+            m_stage->removeReference(m_monitor.handle, m_stage->current());
+            m_stage->commit();
+            m_monitor.handle = 0;
+        }
+        int n = 0;
+        for (int i = static_cast<int>(m_props.size()) - 1; i >= 0; --i)
+            if (m_props[i].device == device)
+                removeProp(static_cast<size_t>(i)), ++n;
+        logf("Removed device %s (%d props)", device.c_str(), n);
+    }
+
     // Undo, clear and the prop limit leave device props (the toaster) alone.
     size_t oldestRemovable() const
     {
@@ -1972,7 +2111,8 @@ private:
     Hud m_hud;
     Browser m_browser;
     MonitorPanel m_monitor;
-    Pose m_rig;                     // tracking -> world (identity until "realign")
+    Pose m_rig;                     // tracking -> world (seated eye height at start, turned and shifted by "realign")
+    bool m_eyesLevelled = false;    // m_rig's height set from the first head pose
     std::optional<Pose> m_rawHead;  // head in tracking space
     struct
     {
