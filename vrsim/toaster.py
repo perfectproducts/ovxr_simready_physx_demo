@@ -52,6 +52,12 @@ LATCH = "drive:linear:physics:targetPosition"
 STEP = 0.01  # [s] co-simulation step; the ECU samples every 0.05 s inside its FMU
 MONITOR_PERIOD = 0.35  # [s] monitor panel redraw while shown
 JOINTS = {"lever": (LEVER, LINEAR), "dial": (DIAL, ANGULAR), "cancel": (CANCEL, LINEAR)}
+# Voice presses (ToasterDevice.press): the ECU's switch positions with margin, held for real seconds
+LEVER_PRESSED, CANCEL_PRESSED = -0.0595, -0.0032  # [m] lever bottom stop, cancel button pressed in
+PRESS_MIN_S, PRESS_MAX_S = 0.3, 2.0
+PRESS_REACHED = 0.01  # [m] the app's joint is this close to the pressed value: it holds by itself
+LATCHED_BELOW = -0.03  # [m] a latch target below this holds the carriage down (spawn_extras lever_latched_below)
+DING_AT =(0.0, 0.0, 0.12)  # [m] where the ding sounds, toaster frame: inside the body, below the slots
 
 
 # --- ovfmi binding ----------------------------------------------------------------------------
@@ -312,6 +318,10 @@ class ToasterScenario:
         m[3, :3] = self.position
         return m
 
+    def to_world(self, local) -> np.ndarray:
+        """A point in the toaster frame -> world."""
+        return (np.array([*local, 1.0]) @ self.placement_matrix())[:3]
+
     def spawn_extras(self) -> dict:
         """Spawn-message fields that make the app treat this prop as the toaster."""
         latch = self.stage.GetPrimAtPath(LEVER)
@@ -326,7 +336,7 @@ class ToasterScenario:
             "glow_light": "Asset" + GLOW.removeprefix(ROOT),
             "glow_shader": "Asset" + GLOW_SHADER.removeprefix(ROOT),
             "glow_max": 30000.0,  # ECU glow_max: HeaterGlow intensity at full heater power
-            "lever_latched_below": -0.03,
+            "lever_latched_below": LATCHED_BELOW,
             "lever_stiffness": float(latch.GetAttribute("drive:linear:physics:stiffness").Get() or 0.0),
         }
 
@@ -365,8 +375,10 @@ class ToasterDevice:
     (heating starts, the dial changes level, the toast pops up) on the info panel."""
 
     def __init__(self, scenario: ToasterScenario, send, feedback=None, monitor: bool = False,
-                 toast_seconds: float = 0.0, eject_height: float = 0.0, on_landed=None):
+                 toast_seconds: float = 0.0, eject_height: float = 0.0, on_landed=None, on_sound=None):
         self.scenario = scenario
+        # on_sound(name, toaster-frame position): e.g. the "ding" at the slots when a cycle finishes
+        self.on_sound = on_sound
         # Called (from a timer thread) 1.5 s after the ejected toast lands.
         self.on_landed = on_landed
         self._toast_mode_seen = 0
@@ -387,6 +399,7 @@ class ToasterDevice:
         self._level = None
         self._cancel_seen = False
         self._toast_mode = 0
+        self._press: tuple | None = None  # voice press: (role, joint value, earliest end, latest end)
         # FMU monitor panel beside the toaster (vrsim/toaster_monitor.py): sampled here, drawn on its
         # own thread while the app shows it.
         from .toaster_monitor import MonitorRenderer, snapshot
@@ -408,6 +421,23 @@ class ToasterDevice:
             for role, value in (("lever", lever), ("dial", dial), ("cancel", cancel)):
                 if value is not None and np.isfinite(value):
                     self._inputs[role] = float(value)
+
+    def press(self, on: bool | None = None) -> str:
+        """A voice "toggle toaster": press the lever (start) or the cancel button (stop) for the user.
+
+        The press overrides the app's measured joint for a moment of real time. The lever stays held
+        until the app reports it down (the ECU's latch drive pulls it there), so the carriage and toast
+        don't bounce up in between. Returns "started", "stopped", "already on" or "already off"."""
+        heating = self._heating
+        if on is None:
+            on = not heating
+        if on == heating:
+            return "already on" if on else "already off"
+        now = time.perf_counter()
+        with self._lock:
+            self._press = ("lever", LEVER_PRESSED, now + PRESS_MIN_S, now + PRESS_MAX_S) if on else \
+                          ("cancel", CANCEL_PRESSED, now + PRESS_MIN_S, now + PRESS_MIN_S)
+        return "started" if on else "stopped"
 
     def set_monitor(self, on: bool) -> None:
         if on:
@@ -462,7 +492,22 @@ class ToasterDevice:
     def _step(self) -> None:
         with self._lock:
             inputs = dict(self._inputs)
+            press = self._press
+            if press:
+                role, value, min_until, max_until = press
+                now = time.perf_counter()
+                done = now >= max_until or (now >= min_until and inputs.get(role, 0.0) <= value + PRESS_REACHED)
+                if done:
+                    self._press = None
+                else:
+                    inputs[role] = value
         usd = self.sim.usd
+        # The latch holds the carriage at the bottom. The app's lever joint settles a little above it
+        # (its spring against the latch drive), which would lift the toast in the slot while it heats:
+        # while latched, the lever counts as no higher than the latch.
+        latch = usd.get(LEVER, {}).get(LATCH, 0.0)
+        if "lever" in inputs and latch < LATCHED_BELOW:
+            inputs["lever"] = min(inputs["lever"], latch)
         for role, (prim, attr) in JOINTS.items():
             if role in inputs:
                 usd.setdefault(prim, {})[attr] = inputs[role]
@@ -504,6 +549,8 @@ class ToasterDevice:
             if cancel or self._cancel_seen:
                 self.feedback.post("info", "Toaster cancelled", f"the toast is {browning_word(browning)}", hold=5.0)
             else:
+                if self.on_sound is not None:
+                    self.on_sound("ding", DING_AT)
                 self.feedback.post("ok", "Ding!", f"the toast is {browning_word(browning)} "
                                                   f"(browning {browning:.2f}) · push the lever to put it back", hold=8.0)
         elif self._level is not None and level != self._level and not heating:
