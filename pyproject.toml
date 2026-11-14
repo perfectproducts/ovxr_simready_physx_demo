@@ -17,7 +17,7 @@ dependencies = [
     "pillow>=13.0.0",
     "physx-usd-schemas==25.11.2.72696984",
     "ovphysx==0.7.0.74035321",
-    "fmpy>=0.3.32",
+    "ovfmi>=0.2,<0.3",  # NVIDIA FMI runtime for USD (vrsim/toaster_ovfmi.py); brings fmpy (pinned by it)
 ]
 
 [tool.uv]

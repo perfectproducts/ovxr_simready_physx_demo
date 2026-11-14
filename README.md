@@ -152,6 +152,8 @@ A toaster stands at the front left of the Studierstube desk, fixed in place, wit
 It is the SyncTwin demonstrator's smart toaster (`assets/synctwin`, see its README): the NVIDIA SimReady
 toaster plus three FMUs, an OpenModelica ECU, a thermal and browning model, and the toast's flight.
 They are wired to the toaster through the ovfmi USD-FMI binding in its USD layers.
+The sidecar runs them with NVIDIA's [ovfmi](https://github.com/NVIDIA-Omniverse/ovfmi) runtime (`FmiHost`, `vrsim/toaster_ovfmi.py`),
+which reads that binding; `VRSIM_FMI_RUNTIME=fmpy` switches to the built-in FMPy loop for comparison.
 
 | Input | Action |
 |---|---|
@@ -191,13 +193,19 @@ and that the Newton edition's sidecar turns on for VR (environment variables in 
 | `eject_height` (`VRSIM_EJECT_HEIGHT`) | 0.9 | the toast rises this high above the slot [m] (authored 0.46 m) and lands on the same spot |
 | `new_toast_after_eject` (`VRSIM_NEW_TOAST`) | on | the landed toast stays on the desk as a grabbable copy, a fresh slice goes into the slot |
 | `monitor_scale` (`VRSIM_MONITOR_SCALE`) | 2 | size of the FMU monitor |
+| (`VRSIM_FMI_RUNTIME`) | `ovfmi` | `fmpy`: the built-in FMPy loop instead of ovfmi, for comparison |
 | `monitor_offset` (`VRSIM_MONITOR_OFFSET`) | on the books | monitor position `x,y[,h]` in the toaster frame; `h` = height of the surface it stands on |
 
-The sidecar (`vrsim/toaster.py`) reads the binding, steps the FMUs with FMPy at 100 Hz in real
-time, and routes their values. The app measures the lever, dial and button joints from the body
+The sidecar steps the FMUs with NVIDIA's ovfmi (`FmiHost`, `vrsim/toaster_ovfmi.py`) every 10 ms in
+real time (50 ms while a cycle is sped up) and routes their values by USD prim path and attribute.
+ovfmi reads the station's binding plus a generated overlay that adds what the VR device needs: outputs
+for the browning level, latch and toast mode, and the higher eject speed as authored start values.
+Its quirks (inputs before the first step are ignored, each step is a full `fmpy.simulate_fmu` call of
+about 0.5 ms, partly mapped vectors read back short) are handled there; the sidecar has no ovstage, so
+`write()` / `read()` carry the values and the stage ovfmi borrows is a placeholder. The app measures the lever, dial and button joints from the body
 poses (PhysX or Newton), then applies the outputs it gets back: the latch, the toast pose and colour,
 and the glow.
-Offline: `uv run python -m vrsim.toaster` runs the SyncTwin 600 s scripted user in a few seconds.
+Offline: `uv run python -m vrsim.toaster` runs the SyncTwin 600 s scripted user in a few seconds (FMPy loop).
 
 ### Voice feedback panel
 
@@ -253,7 +261,8 @@ vrsim/
   catalog.py    HF index (official catalog + partner crawl), fuzzy search, download
   xr_input.py   OpenXR actions on ovxr's borrowed session (pyopenxr ctypes)
   voice.py      push-to-talk capture, Wit.ai /speech, command parser, console input
-  toaster.py    SyncTwin smart toaster: ovfmi binding -> FMPy co-simulation, app protocol
+  toaster.py    SyncTwin smart toaster: device thread, app protocol, FMPy loop (VRSIM_FMI_RUNTIME=fmpy)
+  toaster_ovfmi.py  the toaster's FMUs on ovfmi's FmiHost, plus the VR overlay of its binding
   toaster_monitor.py  the FMU monitor panel: Pillow -> merged quads per colour (+ antialiasing layers)
   sidecar.py    voice, catalog, downloads, browser pages, HUD text and toaster FMUs for the apps
 cpp/                      the C++ app (ovxr + ovrtx + ovstage + ovphysx), see cpp/README.md

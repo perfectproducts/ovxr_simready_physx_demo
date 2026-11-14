@@ -156,17 +156,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cmake"
-version = "4.4.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/14/2a/88d51f5fc74358edb89afedeb8154db0d9c0bbd256747bf28de472e4fa5c/cmake-4.4.4.tar.gz", hash = "sha256:f337d18e33b116cabae9a7a8ff423fc0bc3f389da0acefeb724e1397128dcc34", size = 13287563, upload-time = "2026-10-04T09:10:05.134Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/d5/664ea06d01864f25d6067f09fa218404e4d588edd5e495135ac91429fecb/cmake-4.4.4-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f773a0544c66370408f451acd487c2c643b0dfebb48c5d64f3638bc1bb820238", size = 30245729, upload-time = "2026-10-04T09:09:24.551Z" },
-    { url = "https://files.pythonhosted.org/packages/21/72/48ce731c497ac567151f8919f910ed7c934e4802b4b6323ca5a04c5c0c51/cmake-4.4.4-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:ed50c732a82ac04f6e5606a0677ddfb49dda9ee130f9d4163c5df217e478417e", size = 39468383, upload-time = "2026-10-04T09:09:53.11Z" },
-    { url = "https://files.pythonhosted.org/packages/87/9c/a7918eeeed09b34aa5dc1b767367fb1a2dcbb56171be00be0fd1280fe752/cmake-4.4.4-py3-none-win_amd64.whl", hash = "sha256:ad8e0a38b5707e27882701146bdfffecacd80e7703fa0fc36c77528518d545af", size = 42321211, upload-time = "2026-10-04T09:09:58.982Z" },
-]
-
-[[package]]
 name = "coacd"
 version = "1.0.14"
 source = { registry = "https://pypi.org/simple" }
@@ -293,11 +282,10 @@ wheels = [
 
 [[package]]
 name = "fmpy"
-version = "0.3.32"
+version = "0.3.25"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
-    { name = "cmake" },
     { name = "jinja2" },
     { name = "lark" },
     { name = "lxml" },
@@ -307,7 +295,7 @@ dependencies = [
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/4c/5e085b9b0c823eb298af2e50edf98c8d8d9af3f04edbb8e972a8dabc97fb/fmpy-0.3.32-py3-none-any.whl", hash = "sha256:b379deb9417b842028003a288d00c1c5f138d1580e1ff12cc6c42a98719cecf0", size = 6357420, upload-time = "2026-09-09T13:03:28.567Z" },
+    { url = "https://files.pythonhosted.org/packages/72/a8/835e69757402253ccffc0b3e958467ad6cd59ba6694cbe4e2fa075ba3e13/fmpy-0.3.25-py3-none-any.whl", hash = "sha256:00b0d19c431051be439f28ca27c2e860f9792281cec9ce6acd710c04a111a2c3", size = 4947439, upload-time = "2025-06-17T07:33:36.071Z" },
 ]
 
 [[package]]
@@ -837,6 +825,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/b8/b3091989d7f928eb19d1b961544da70b0bf10dedcfc91a53410f8f86ad6f/open3d-0.20.0-cp312-cp312-win_amd64.whl", hash = "sha256:60010f21d44f13557ba007893bc13a69827faa4dc49eedd923d1397096c20d92", size = 77497277, upload-time = "2026-09-16T21:23:35.565Z" },
     { url = "https://files.pythonhosted.org/packages/f2/13/787f1594b422492c367a55789718e4c77e1f9a588701310b9e383b5c2de8/open3d-0.20.0-cp313-cp313-manylinux_2_35_x86_64.whl", hash = "sha256:fd67667543fb1a0e2c05200f0ae3433038562cf93050965ac8e8fdda5964a1ab", size = 400787766, upload-time = "2026-09-16T21:19:02.908Z" },
     { url = "https://files.pythonhosted.org/packages/cf/53/829c9a24135fad4576e31bed756eade26b1e904d7e01740b520c4ba739d1/open3d-0.20.0-cp313-cp313-win_amd64.whl", hash = "sha256:689fd4fb3579b2312439b9bceaf92cbb147586b6afc95bdbf6c16e98f5ea15c5", size = 77497479, upload-time = "2026-09-16T21:25:53.971Z" },
+]
+
+[[package]]
+name = "ovfmi"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fmpy" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/f1/6d49c5001b7748915bb7bbbbc5e79346387a0b1ef3cefcc1842f3e1f40e3/ovfmi-0.2.0-py3-none-any.whl", hash = "sha256:54690c27e3a63e88f5c86e4409458547d8c3a7fc701e77bb389d78826aab128d", size = 31667, upload-time = "2026-08-24T18:09:00.263Z" },
 ]
 
 [[package]]
@@ -1462,11 +1463,11 @@ name = "vr-simready-physx"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fmpy" },
     { name = "huggingface-hub" },
     { name = "newton", extra = ["importers"] },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "ovfmi" },
     { name = "ovphysx" },
     { name = "ovrtx" },
     { name = "ovstage" },
@@ -1481,10 +1482,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fmpy", specifier = ">=0.3.32" },
     { name = "huggingface-hub" },
     { name = "newton", extras = ["importers"] },
     { name = "numpy" },
+    { name = "ovfmi", specifier = ">=0.2,<0.3" },
     { name = "ovphysx", specifier = "==0.7.0.74035321" },
     { name = "ovrtx", specifier = "==0.6.0.1791947691", index = "https://pypi.nvidia.com/" },
     { name = "ovstage", specifier = "==0.3.0.1791986420", index = "https://pypi.nvidia.com/" },

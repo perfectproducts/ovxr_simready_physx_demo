@@ -20,7 +20,7 @@ dependencies = [
     "numpy",
     "requests",
     "pillow>=13.0.0",
-    "fmpy>=0.3.32",
+    "ovfmi>=0.2,<0.3",  # NVIDIA FMI runtime for USD (vrsim/toaster_ovfmi.py); brings fmpy (pinned by it)
     "usd-core",
     "scipy",
 ]

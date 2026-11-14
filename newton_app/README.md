@@ -12,7 +12,7 @@ library set the Omniverse Realtime Viewer skill prescribes, with
                      publication           (Newton never parses USD)                   one transform write per frame
                                                      ▲
  sidecar: python -m vrnx.sidecar ────────────────────┘ voice (Wit.ai), SimReady catalog + downloads, browser pages,
- (vrsim.sidecar + ovnewton fixups, port 47801)        HUD text, toaster FMUs (FMPy), asset fixups for ovnewton
+ (vrsim.sidecar + ovnewton fixups, port 47801)        HUD text, toaster FMUs (ovfmi), asset fixups for ovnewton
 ```
 
 | Library | Role here |
