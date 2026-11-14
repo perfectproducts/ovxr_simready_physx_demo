@@ -101,7 +101,7 @@ class NewtonSidecar(base.Sidecar):
         """Leave the toasted slice on the desk as a grabbable copy (the app places it where the
         FMU toast lies and paints it its browning colour), then reset the toaster with a fresh one.
         The copy's spawn goes out first, so the app still has the landed pose and colour."""
-        if self.toast_prop is not None:
+        if self.toast_prop is not None and self.toaster_shown:
             self._quiet_spawns += 1
             self.link.send({"t": "spawn", "name": "Toast", "count": 1, **self._spawn_payload(self.toast_prop),
                             "at_toast": True, "tint": {"prim": TOAST_LOOK, "attr": "inputs:diffuseColor"}})
@@ -132,6 +132,7 @@ class NewtonSidecar(base.Sidecar):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Voice/catalog sidecar for the Newton VR app")
     parser.add_argument("--mic", help="Input device name or index")
+    parser.add_argument("--speaker", help="Output device for 3D sound, name or index (default: the system default; or VRSIM_SPEAKER)")
     parser.add_argument("--refresh-catalog", action="store_true")
     parser.add_argument("--no-console", action="store_true")
     parser.add_argument("--prepare-only", action="store_true", help="write the environments and exit")
@@ -174,6 +175,8 @@ def main() -> None:
         toaster.new_toast_after_eject = True
     if args.mic:
         config.mic_device = int(args.mic) if args.mic.isdigit() else args.mic
+    if args.speaker:
+        config.speaker_device = int(args.speaker) if args.speaker.isdigit() else args.speaker
     if args.prepare_only:
         from vrsim.browser import BrowserBuilder
 

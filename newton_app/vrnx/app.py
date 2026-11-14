@@ -41,6 +41,9 @@ from .xr_input import HandInput, InputFrame, XrInput  # noqa: E402
 log = logging.getLogger("vrnx")
 
 SIDECAR_PORT = 47801
+# Seated eye height [m] in the world: the 0.78 m desk plus ~0.44 m. Set at start and on every recenter
+# (the tracking space's own floor or origin can leave the view at the desk's height). 0 = tracking's height.
+EYE_HEIGHT = float(os.environ.get("VRSIM_EYE_HEIGHT", "1.22") or 0)
 PHYSICS_DT = 1.0 / 72.0  # Quest 3 refresh
 MAX_PROPS = 40
 GRAB_ON, GRAB_OFF, GRAB_REACH, RAY_MAX = 0.55, 0.35, 0.12, 8.0
@@ -51,6 +54,16 @@ POKE_REACH = 0.06  # [m] controller to the toaster's cancel button for a trigger
 GLOW_EMISSION = 6.0  # slot strip emissiveColor at full heater glow
 DESK_PROP_MAX = 0.35  # [m] largest side of a prop that spawns on the desk
 HUD_FLOATS = 6000 * 4 * 3  # vrsim.hud.MAX_QUADS quads x 4 corners x xyz
+# Info panel placement: (yaw left of the view [deg], drop below the eyes [m]) in order of preference,
+# the first one that doesn't cut through the toaster or its monitor (vrsim.hud FOLLOW_* is the first).
+HUD_SPOTS = ((35, 0.25), (35, 0.05), (55, 0.25), (55, 0.05), (-35, 0.25), (-35, 0.05), (20, -0.1))
+HUD_DISTANCE = 0.85  # [m] from the head
+HUD_HALF = (0.36, 0.125)  # [m] vrsim.hud PANEL_W / 2, PANEL_H / 2
+HUD_NAV = ((0.36 - 0.165, -0.125 + 0.024), (0.36 - 0.035, -0.125 + 0.024))  # vrsim.hud NAV_PREV, NAV_NEXT
+HUD_NAV_HALF = 0.018  # vrsim.hud NAV_HALF
+HUD_CLEARANCE = 0.03  # [m] gap kept to obstacles
+HUD_REPLACE_OVERLAP = 0.02  # [m] an anchored panel moves when something reaches this far into it
+MONITOR_SIZE = (0.40, 0.30)  # [m] vrsim.toaster_monitor PANEL_W, PANEL_H at scale 1
 
 HANDS = ("/World/Hands/Left", "/World/Hands/Right")
 RAYS = ("/World/Hands/LeftRay", "/World/Hands/RightRay")
@@ -177,7 +190,7 @@ class MonitorLayer:
 @dataclass
 class Monitor:
     handle: int = 0
-    on: bool = True
+    on: bool = False  # hidden until the menu button or "toggle signal monitor"
     layers: list[MonitorLayer] = field(default_factory=list)
     offset: np.ndarray = field(default_factory=lambda: np.array([0.0, -0.34, 0.19]))
     scale: float = 1.0
@@ -249,6 +262,7 @@ class Hud:
     pose: Pose = field(default_factory=Pose)
     visible: bool = False
     trigger_down: list = field(default_factory=lambda: [False, False])
+    nav: bool = False  # the text has page buttons (help): ◀ at HUD_NAV[0], ▶ at HUD_NAV[1]
 
 
 def in_rect(local, r) -> bool:
@@ -311,6 +325,7 @@ class App:
         self.head: Pose | None = None
         self.raw_head: Pose | None = None
         self.rig = Pose()
+        self.eyes_levelled = False  # the rig's height is set from the first head pose (EYE_HEIGHT)
         self.pending_floats: list[tuple[str, str, tuple]] = []  # one-off material writes (toast copies)
         self.chord = False  # A + X held for a recenter: no push-to-talk until both are released
         self.props: list[Prop] = []
@@ -368,6 +383,9 @@ class App:
                 if frame.head is not None:
                     self.head = frame.head
                     self.raw_head = self.tracking_pose(frame.head)
+                    if not self.eyes_levelled:  # the first head pose: seated eye height, same spot and heading
+                        self.eyes_levelled = True
+                        self.publish_rig("start")
                 if self.xr:
                     self.buttons(frame)
                     self.browser_grab(frame)  # before interact(): grip on the handle must not grab props
@@ -442,6 +460,24 @@ class App:
             anchor = self.rig
         return anchor.inverse() * world
 
+    def publish_rig(self, why: str) -> None:
+        """Lift the rig so the eyes are at EYE_HEIGHT (it only turns about Z, so world eye z = rig z +
+        tracking eye z), then make it ovxr's anchor."""
+        if EYE_HEIGHT > 0 and self.raw_head is not None:
+            self.rig = Pose((self.rig.p[0], self.rig.p[1], EYE_HEIGHT - float(self.raw_head.p[2])), self.rig.q)
+        # ovxr places the eye cameras (and maps controller poses) through its anchor, latched at
+        # each frame boundary. Writing /World/Rig alone does not move it: publish the rig as ovxr's
+        # managed anchor. That call writes and seals its own ordinal, so the clock moves past it.
+        try:
+            self.ctx.set_managed_anchor_transform(self.rig.to_row_major(), stage_ordinal=self.rt.current())
+        except Exception as exc:
+            log.warning("%s: set_managed_anchor_transform failed: %s", why, exc)
+        finally:
+            self.rt.resolve()
+        log.info("Rig (%s): eyes at %.2f m (tracking %.2f m)", why, EYE_HEIGHT if EYE_HEIGHT > 0 else
+                 float(self.raw_head.p[2]) if self.raw_head is not None else 0.0,
+                 float(self.raw_head.p[2]) if self.raw_head is not None else 0.0)
+
     def realign(self) -> None:
         """Turn and shift the rig so the head stands over the seat (world origin), facing +Y."""
         if self.raw_head is None:
@@ -454,15 +490,7 @@ class App:
         q = axis_angle(Z, math.pi / 2 - math.atan2(f[1], f[0]))
         head = np.array([self.raw_head.p[0], self.raw_head.p[1], 0.0])
         self.rig = Pose(-(Pose((0, 0, 0), q).axis(head)), q)
-        # ovxr places the eye cameras (and maps controller poses) through its anchor, latched at
-        # each frame boundary. Writing /World/Rig alone does not move it: publish the rig as ovxr's
-        # managed anchor. That call writes and seals its own ordinal, so the clock moves past it.
-        try:
-            self.ctx.set_managed_anchor_transform(self.rig.to_row_major(), stage_ordinal=self.rt.current())
-        except Exception as exc:
-            log.warning("Realign: set_managed_anchor_transform failed: %s", exc)
-        finally:
-            self.rt.resolve()
+        self.publish_rig("realign")
         for h in self.hands:
             h.history.clear()  # no throw from the jump
         self.hud.pos = None
@@ -497,11 +525,17 @@ class App:
         if h[0].secondary_pressed:
             self.clear()
         if (h[0].menu_pressed or h[1].menu_pressed) and self.monitor.handle:
-            self.monitor.on = not self.monitor.on
-            self.link.send({"t": "toaster_monitor", "on": self.monitor.on})
+            self.set_monitor(not self.monitor.on)
             self.haptic(0, 0.3, 0.03)
-            if self.toaster:
-                self.toaster.color_dirty = True  # repaint the swatch with the panel
+
+    def set_monitor(self, on: bool) -> None:
+        """Show / hide the toaster's FMU monitor (menu button, or "toggle signal monitor" via the sidecar)."""
+        if not self.monitor.handle:
+            return
+        self.monitor.on = on
+        self.link.send({"t": "toaster_monitor", "on": self.monitor.on})  # the sidecar starts / stops frames
+        if self.toaster:
+            self.toaster.color_dirty = True  # repaint the swatch with the panel
 
     # --- bodies ----------------------------------------------------------------------------------
     def body_index(self, prop: Prop, b: int) -> int | None:
@@ -920,7 +954,10 @@ class App:
         if t - ts.last_sent < 1.0 / 60.0 or not ts.lever.seen:
             return
         ts.last_sent = t
-        self.link.send({"t": "toaster_in", "lever": ts.lever.value, "dial": ts.dial.value, "cancel": cancel})
+        msg = {"t": "toaster_in", "lever": ts.lever.value, "dial": ts.dial.value, "cancel": cancel}
+        if self.head is not None:  # world pose of the view: the sidecar's 3D sound (the ding) is heard from here
+            msg["head"] = [*map(float, self.head.p), *map(float, self.head.q)]
+        self.link.send(msg)
 
     def hand_holds(self, prop: Prop, b: int) -> bool:
         return any(h.prop is prop and h.body == b and not h.whole for h in self.hands)
@@ -1028,7 +1065,7 @@ class App:
                 self.rt.write_floats(self.monitor.swatch, "inputs:diffuseColor", c, ordinal)
                 self.rt.write_floats(self.monitor.swatch, "inputs:emissiveColor", 0.5 * c, ordinal)
             ts.color_dirty = False
-        if self.monitor.on:
+        if self.monitor.on and self.monitor.handle:  # handle 0: removed with the toaster
             for layer in self.monitor.layers:
                 if layer.pending and layer.points is not None:
                     self.rt.write_points(layer.prim, layer.points, ordinal)
@@ -1094,15 +1131,16 @@ class App:
         panel = Pose()
         if visible:
             fwd = flat_forward(self.head)
-            side = Pose((0, 0, 0), axis_angle(Z, math.radians(35))).axis(fwd)  # off to the left, a little low
-            target = self.head.p + side * 0.85 - (0, 0, 0.25)
+            obstacles = self.hud_obstacles()
             if hud.pos is not None:
                 to_panel = hud.pos - self.head.p
                 to_panel[2] = 0
                 if np.linalg.norm(to_panel) > 1e-3 and (to_panel / np.linalg.norm(to_panel)) @ fwd < math.cos(math.radians(70)):
-                    hud.anchor = target  # re-placed only when it drifts ~70 deg out of view
+                    hud.anchor = self.hud_target(fwd, obstacles)  # re-placed when it drifts ~70 deg out of view
+                elif self.hud_overlap(hud.anchor, obstacles) > HUD_REPLACE_OVERLAP:
+                    hud.anchor = self.hud_target(fwd, obstacles)  # or something now stands in it (monitor shown)
             else:
-                hud.anchor = target
+                hud.anchor = self.hud_target(fwd, obstacles)
             k = min(1.0, (now - self.hud_last) * 3.0)
             hud.pos = hud.anchor.copy() if hud.pos is None else hud.pos + (hud.anchor - hud.pos) * k
             panel = facing(hud.pos, self.head, -fwd)
@@ -1116,6 +1154,48 @@ class App:
         for i, path in enumerate(ACCENTS):
             prims.append(path)
             mats.append((panel * Pose((-0.36 + 0.018, 0, 0.003))).to_row_major() if visible and i == accent else HIDDEN)
+
+    def hud_obstacles(self) -> list[tuple[np.ndarray, float]]:
+        """What the info panel must not cut through, as world spheres: the toaster's bodies and,
+        while shown, its FMU monitor."""
+        ts = self.toaster
+        if ts is None:
+            return []
+        out = []
+        for b in range(len(ts.prop.body_paths)):
+            pose = self.body_pose(ts.prop, b)
+            if pose is not None:
+                out.append(self.body_sphere(ts.prop, b, pose))
+        base = self.body_pose(ts.prop, ts.base)
+        if self.monitor.handle and self.monitor.on and base is not None:
+            out.append(((base * Pose(self.monitor.offset)).p, 0.5 * math.hypot(*MONITOR_SIZE) * self.monitor.scale))
+        return out
+
+    def hud_overlap(self, pos, obstacles) -> float:
+        """How far [m] the panel at ``pos`` (facing the head) reaches into the nearest obstacle (<= 0: clear)."""
+        if not obstacles:
+            return -1.0
+        inv = facing(pos, self.head).inverse()
+        worst = -1.0
+        for centre, radius in obstacles:
+            x, y, z = (inv * Pose(centre)).p
+            gap = math.sqrt(max(abs(x) - HUD_HALF[0], 0.0) ** 2 + max(abs(y) - HUD_HALF[1], 0.0) ** 2 + z * z)
+            worst = max(worst, radius + HUD_CLEARANCE - gap)
+        return worst
+
+    def hud_target(self, fwd, obstacles) -> np.ndarray:
+        """Where the info panel goes: off to the left and a little low, unless that cuts through the
+        toaster or its monitor; then the first clear spot of HUD_SPOTS (or the least blocked one)."""
+        best, best_overlap = None, math.inf
+        for yaw, drop in HUD_SPOTS:
+            side = Pose((0, 0, 0), axis_angle(Z, math.radians(yaw))).axis(fwd)
+            pos = self.head.p + side * HUD_DISTANCE - (0, 0, drop)
+            overlap = self.hud_overlap(pos, obstacles)
+            if overlap <= 0.0:
+                return pos
+            if overlap < best_overlap:
+                best, best_overlap = pos, overlap
+        return best
 
     def hud_hit(self, origin, direction):
         if not self.hud.visible:
@@ -1157,6 +1237,11 @@ class App:
                 self.hud.hold = 0  # hidden from the next frame on
                 self.haptic(h, 0.4, 0.03)
                 self.link.send({"t": "hud_closed"})  # the sidecar cancels a running download
+            elif pressed and self.hud.nav:
+                for delta, (cx, cy) in zip((-1, 1), HUD_NAV):
+                    if abs(local[0] - cx) <= HUD_NAV_HALF + 0.012 and abs(local[1] - cy) <= HUD_NAV_HALF + 0.012:
+                        self.haptic(h, 0.3, 0.03)
+                        self.link.send({"t": "hud_page", "delta": delta})
 
     # --- asset browser ---------------------------------------------------------------------------
     def tile_center(self, index: int) -> tuple[float, float]:
@@ -1322,6 +1407,10 @@ class App:
                     self.on_toaster(msg)
                 elif t == "toaster_monitor_frame":
                     self.monitor_frame(msg)
+                elif t == "toaster_monitor":
+                    self.set_monitor(bool(msg.get("on", not self.monitor.on)))
+                elif t == "remove_device":
+                    self.remove_device(str(msg.get("device", "")))
                 elif t == "realign":
                     self.realign()
                 elif t == "browser":
@@ -1335,6 +1424,7 @@ class App:
                     self.hud.points = decode_floats(msg.get("points", ""))
                     self.hud.kind = msg.get("kind", "info")
                     self.hud.hold = float(msg.get("hold", 6.0))
+                    self.hud.nav = bool(msg.get("nav", False))
                     self.hud.posted = time.perf_counter()
                     self.hud.pending = True
             except Exception:
@@ -1439,6 +1529,15 @@ class App:
             self.toaster = None
         if rebuild and ordinal is not None:
             self.physics.rebuild(ordinal)
+
+    def remove_device(self, device: str) -> None:
+        """Remove a device prop (the toaster: "hide the toaster"), which undo / clear keep, and its monitor."""
+        doomed = [p for p in self.props if p.device == device]
+        if device == "toaster" and self.monitor.handle:
+            self.rt.remove_references([self.monitor.handle])  # placed only with the toaster: would freeze in the air
+            self.monitor.handle = 0  # setup_monitor adds it again with the next toaster
+        self.remove_props(doomed)
+        log.info("Removed device %s (%d props)", device, len(doomed))
 
     def oldest_removable(self) -> Prop:
         return next((p for p in self.props if not p.device), self.props[0])

@@ -40,7 +40,7 @@ Or by hand, in two terminals: `uv run python -m vrnx.sidecar` and `uv run python
 The app waits for the headset (Quest Link / Air Link as the active OpenXR runtime) and for the sidecar.
 Controls are those of the C++ app (see the repository README): grip grabs and throws, trigger points,
 places and fixes, A/X push-to-talk, B undo, Y clear, thumbstick click opens the catalog, left menu
-toggles the toaster's FMU monitor. **A + X together recenters the room** (the desk in front of where
+toggles the toaster's FMU monitor (hidden at start; voice: "toggle signal monitor"). **A + X together recenters the room** (the desk in front of where
 you look; voice: "recenter the room"). The C++ app's sidecar (port 47800) can run alongside.
 If Quest Link starts after the app, restart the app: its OpenXR instance does not see a headset
 that appears later.

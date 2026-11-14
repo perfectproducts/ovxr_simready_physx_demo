@@ -15,13 +15,18 @@ one localhost TCP connection carrying JSON lines.
                     "position":[x,y,z] (optional: place the asset origin there, unrotated)}
                    {"t":"undo"}  {"t":"clear"}  {"t":"fix","on":true|false}  (a held / last touched prop)
                    {"t":"realign"}  (move the scene so the user's head is at the seat, facing the desk)
-                   {"t":"hud","kind":..,"hold":s,"points":"<base64 float32 x,y,z ...>"}
+                   {"t":"remove_device","device":"toaster"}  (remove a device prop, which undo / clear keep)
+                   {"t":"hud","kind":..,"hold":s,"nav":bool,"points":"<base64 float32 x,y,z ...>"}
+                   (nav: the text has page buttons at vrsim.hud NAV_PREV / NAV_NEXT)
+  app -> sidecar   {"t":"hud_page","delta":-1|1}   (one of those buttons pressed)
   toaster (vrsim/toaster.py): spawned with "device":"toaster", then
-  app -> sidecar   {"t":"toaster_in","lever":m,"dial":deg,"cancel":m}
+  app -> sidecar   {"t":"toaster_in","lever":m,"dial":deg,"cancel":m,"head":[x,y,z,qx,qy,qz,qw]}
+                   (head: world pose of the view, for 3D sound: vrsim/spatial_audio.py)
   sidecar -> app   {"t":"toaster","lever_target":m,"toast":[x,y,z,rot],"toast_color":[r,g,b],"glow":..,...}
   toaster monitor (vrsim/toaster_monitor.py): spawn field "monitor":{layer,layers,z,offset,swatch}, then
   sidecar -> app   {"t":"toaster_monitor_frame","layers":{name:"<base64 float32 x0,y0,x1,y1 ...>"}}
-  app -> sidecar   {"t":"toaster_monitor","on":bool}
+  app -> sidecar   {"t":"toaster_monitor","on":bool}     (shown / hidden; the panel starts hidden)
+  sidecar -> app   {"t":"toaster_monitor","on":bool}     (voice: show / hide it; the app answers as above)
 
     uv run python -m vrsim.sidecar           (then start cpp\\build\\vrsim_cpp.exe)
 """
@@ -49,6 +54,7 @@ from .config import Config
 from .hud import Feedback, TextLayout, download_progress
 from .scene import write_desk_prop, write_environment, write_placement_hulls
 from .toaster import ToasterDevice, ToasterScenario
+from .spatial_audio import SpatialAudio
 from .toaster_monitor import monitor_extras
 from .voice import Command, VoiceListener, start_console
 
@@ -88,17 +94,17 @@ class RelayFeedback(Feedback):
         self.link = link
         self.layout = TextLayout()
 
-    def post(self, kind: str, title: str, detail: str = "", hold: float | None = None) -> None:
-        super().post(kind, title, detail, hold)
+    def post(self, kind: str, title: str, detail: str = "", hold: float | None = None, nav: str = "") -> None:
+        super().post(kind, title, detail, hold, nav)
         msg = self.current()
-        points = self.layout.points(title, detail).astype(np.float32)
-        self.link.send({"t": "hud", "kind": kind, "hold": msg.hold,
+        points = self.layout.points(title, detail, nav).astype(np.float32)
+        self.link.send({"t": "hud", "kind": kind, "hold": msg.hold, "nav": bool(nav),
                         "points": base64.b64encode(points.tobytes()).decode("ascii")})
 
     def resend(self) -> None:
         msg = self.current()
         if msg.title:
-            self.post(msg.kind, msg.title, msg.detail, msg.hold)
+            self.post(msg.kind, msg.title, msg.detail, msg.hold, msg.nav)
 
 
 class Sidecar:
@@ -109,6 +115,9 @@ class Sidecar:
         self.commands: "queue.Queue[Command]" = queue.Queue()
         self.catalog = SimReadyCatalog(config).load(refresh=refresh)
         self.voice = VoiceListener(config, self.commands, self.feedback)
+        self.audio = SpatialAudio(config.speaker_device)  # 3D sounds, heard from the head the app reports
+        if self.audio.enabled:
+            self.audio.sound("ding")  # load assets/sounds/ding.wav now, not when the first cycle ends
         self.browser = BrowserBuilder(config.generated_dir)
         self.env_path = write_environment(config, config.generated_dir / "environment_physics.usda", physics=True,
                                           loading_layer=self.browser.loading_layer())
@@ -130,7 +139,13 @@ class Sidecar:
         self.toaster: ToasterScenario | None = None
         self.toaster_info = None
         self.toaster_device: ToasterDevice | None = None
-        self.toaster_monitor_on = True  # the panel beside the toaster; the app toggles it (left menu button)
+        # The panel beside the toaster, off until shown: the app toggles it (menu button) and reports
+        # it; "toggle signal monitor" asks the app to.
+        self.toaster_monitor_on = False
+        # The toaster itself, hidden until "show the toaster" (kept across app reconnects).
+        self.toaster_shown = False
+        self._help_version = 0  # the HUD message version of the help page on the panel (0: none)
+        self._help_page = 0
         if config.environment.usd is not None and config.environment.toaster.enabled:
             try:
                 t = config.environment.toaster
@@ -170,9 +185,10 @@ class Sidecar:
             for name, info, position in self.desk_props:
                 self.link.send({"t": "spawn", "name": name, "count": 1, **self._spawn_payload(info),
                                 "position": list(position)})
-            self._start_toaster()
+            if self.toaster_shown:
+                self._start_toaster()
             self.feedback.post("info", "Hold A or X and speak",
-                               "“add a mug” · “what balls are available?” · “undo” · “clear all”", hold=12.0)
+                               "“add a mug” · “show the toaster” · “undo” · say “help” for all commands", hold=12.0)
             try:
                 self._read_loop(sock)
             finally:
@@ -239,6 +255,9 @@ class Sidecar:
             if self.page and 0 <= index < len(self.page.entries):
                 self._info_pool.submit(self._safely, self._show_entry_info, self._hover_request,
                                        self.page.entries[index])
+        elif kind == "hud_page":  # the info panel's ◀ ▶ (help pages)
+            if self._help_showing():
+                self._help(self._help_page + (1 if int(msg.get("delta", 1)) > 0 else -1))
         elif kind == "browser_page":
             self.commands.put(Command("browser_page", count=int(msg.get("delta", 1))))
         elif kind == "browser_closed":  # closed from the panel's ✕ button
@@ -253,7 +272,11 @@ class Sidecar:
                 self.toaster_device.set_monitor(self.toaster_monitor_on)
         elif kind == "toaster_in" and self.toaster_device:
             self.toaster_device.set_inputs(msg.get("lever"), msg.get("dial"), msg.get("cancel"))
+            self.audio.set_listener(msg.get("head"))
         elif kind == "new_toast":
+            if self.toaster_device is None:
+                self.feedback.post("info", "No toaster here", "say “show the toaster”")
+                return
             self._start_toaster(respawn=False)
             self.feedback.post("ok", "Fresh toast", "a new slice and a cold toaster", hold=4.0)
         elif kind == "log":
@@ -277,6 +300,16 @@ class Sidecar:
                                        hold=4.0)
                 elif command.kind == "new_toast":
                     self._on_app_message({"t": "new_toast"})
+                elif command.kind == "toaster":
+                    self._toggle_toaster(command.query)
+                elif command.kind == "monitor":
+                    self._toggle_monitor(command.query)
+                elif command.kind == "toaster_visible":
+                    self._show_toaster(command.query)
+                elif command.kind == "help":
+                    self._help()
+                elif command.kind == "browser_page" and self._help_showing():  # "next page" while help is up
+                    self._help(self._help_page + command.count)
                 elif command.kind in ("undo", "clear"):
                     self.link.send({"t": command.kind})
                 elif command.kind in ("fix", "unfix"):
@@ -310,10 +343,79 @@ class Sidecar:
         t = self.config.environment.toaster
         self.toaster_device = ToasterDevice(self.toaster, self.link.send, self.feedback, monitor=self.toaster_monitor_on,
                                             toast_seconds=t.toast_seconds, eject_height=t.eject_height,
-                                            on_landed=self._toast_landed if t.new_toast_after_eject else None)
+                                            on_landed=self._toast_landed if t.new_toast_after_eject else None,
+                                            on_sound=self._toaster_sound)
+
+    def _toaster_sound(self, name: str, local) -> None:
+        if self.toaster is not None:
+            self.audio.play(name, self.toaster.to_world(local))
+
+    def _toggle_toaster(self, switch: str) -> None:
+        """'toggle toaster': press the lever when idle, the cancel button while it heats. The device's
+        own events then say "Toasting · level n" or "Toaster cancelled"."""
+        if self.toaster_device is None:
+            self.feedback.post("info", "No toaster here", "say “show the toaster”")
+            return
+        result = self.toaster_device.press({"on": True, "off": False}.get(switch))
+        if result.startswith("already"):
+            self.feedback.post("info", f"The toaster is {result.removeprefix('already ')}", hold=3.0)
+
+    def _toggle_monitor(self, switch: str) -> None:
+        """'toggle signal monitor': the app shows / hides the panel and reports back (toaster_monitor)."""
+        if self.toaster_device is None:
+            self.feedback.post("info", "No signal monitor", "it belongs to the toaster: say “show the toaster”")
+            return
+        on = {"on": True, "off": False}.get(switch, not self.toaster_monitor_on)
+        self.link.send({"t": "toaster_monitor", "on": on})
+        self.feedback.post("ok", "Signal monitor on" if on else "Signal monitor off",
+                           "the toaster's FMU signals · say “toggle signal monitor” or press the menu button", hold=3.0)
+
+    def _show_toaster(self, switch: str) -> None:
+        """'show / hide the toaster': spawn it with fresh FMUs, or stop them and have the app remove
+        it (and its monitor)."""
+        if self.toaster is None:
+            self.feedback.post("error", "No toaster in this scene", "it belongs to the Studierstube environment")
+            return
+        on = {"on": True, "off": False}.get(switch, not self.toaster_shown)
+        if on == self.toaster_shown:
+            self.feedback.post("info", "The toaster is already " + ("there" if on else "hidden"), hold=3.0)
+            return
+        self.toaster_shown = on
+        if on:
+            self._start_toaster()
+            self.feedback.post("ok", "Toaster on the desk", "“toggle toaster” toasts · “toggle signal monitor” shows "
+                                                            "its FMUs · “hide the toaster” removes it", hold=6.0)
+        else:
+            self._stop_toaster()
+            self.link.send({"t": "remove_device", "device": "toaster"})
+            self.feedback.post("ok", "Toaster hidden", "say “show the toaster” to bring it back", hold=4.0)
+
+    HELP_PAGES = (
+        ("Objects", "“add a mug” · “spawn three footballs” · “what balls are available?” · “undo” · "
+                    "“clear all” · “cancel” (a download)"),
+        ("Objects and room", "“fix it” · “free it” · “open the catalog” · “next page” · “close the catalog” · "
+                             "“recenter the room”"),
+        ("Toaster", "“show / hide the toaster” · “toggle toaster” (start / stop) · “new toast” · "
+                    "“toggle signal monitor”"),
+    )
+    HELP_HOLD_S = 60.0  # a help page stays until paged, closed or replaced
+
+    def _help(self, page: int = 0) -> None:
+        """'help': every voice command, a page at a time (the info panel holds three lines). The
+        panel's ◀ ▶ buttons ("hud_page") or "next page" / "previous page" turn the pages."""
+        n = len(self.HELP_PAGES)
+        page %= n
+        title, detail = self.HELP_PAGES[page]
+        self.feedback.post("info", f"Help · {title}", detail, hold=self.HELP_HOLD_S, nav=f"{page + 1}/{n}")
+        self._help_page, self._help_version = page, self.feedback.current().version
+
+    def _help_showing(self) -> bool:
+        return self._help_version and self.feedback.current().version == self._help_version
 
     def _toast_landed(self) -> None:
         """The ejected toast has landed: a fresh slice into the slot and a reset toaster."""
+        if not self.toaster_shown:
+            return  # hidden while the toast was in the air
         try:
             self._start_toaster(respawn=False)
             self.feedback.post("ok", "Fresh toast in the slot", "push the lever down for the next one", hold=5.0)
@@ -471,6 +573,7 @@ def _format_bytes(n: int) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Voice/catalog sidecar for the C++ VR app")
     parser.add_argument("--mic", help="Input device name or index")
+    parser.add_argument("--speaker", help="Output device for 3D sound, name or index (default: the system default; or VRSIM_SPEAKER)")
     parser.add_argument("--refresh-catalog", action="store_true")
     parser.add_argument("--no-console", action="store_true")
     args = parser.parse_args()
@@ -484,6 +587,8 @@ def main() -> None:
     config = Config()
     if args.mic:
         config.mic_device = int(args.mic) if args.mic.isdigit() else args.mic
+    if args.speaker:
+        config.speaker_device = int(args.speaker) if args.speaker.isdigit() else args.speaker
     sidecar = Sidecar(config, refresh=args.refresh_catalog)
     if not args.no_console:
         start_console(sidecar.commands)
