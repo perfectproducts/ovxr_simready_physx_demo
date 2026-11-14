@@ -21,6 +21,7 @@ the latch target for the lever, the toast's pose and colour, and the heater glow
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -50,6 +51,9 @@ LINEAR, ANGULAR = "state:linear:physics:position", "state:angular:physics:positi
 LATCH = "drive:linear:physics:targetPosition"
 
 STEP = 0.01  # [s] co-simulation step; the ECU samples every 0.05 s inside its FMU
+FAST_STEP = 0.05  # [s] the step while a heating cycle runs faster than real time (same results, a fifth of the calls)
+# Which runtime steps the FMUs: "ovfmi" (NVIDIA's FmiHost, vrsim/toaster_ovfmi.py) or "fmpy" (CoSimulation here).
+FMI_RUNTIME = os.environ.get("VRSIM_FMI_RUNTIME", "ovfmi").strip().lower() or "ovfmi"
 MONITOR_PERIOD = 0.35  # [s] monitor panel redraw while shown
 JOINTS = {"lever": (LEVER, LINEAR), "dial": (DIAL, ANGULAR), "cancel": (CANCEL, LINEAR)}
 # Voice presses (ToasterDevice.press): the ECU's switch positions with margin, held for real seconds
@@ -234,6 +238,20 @@ class ToasterScenario:
     position: tuple[float, float, float] = (0.0, 0.0, 0.0)
     yaw: float = 0.0
     base: str = "Asset/Geometry/body_obj_01"
+    _ovfmi: object = field(default=None, repr=False)  # one ovfmi host per scenario: attaching parses for ~1.4 s
+
+    def cosimulation(self, launch: dict[str, float] | None = None):
+        """The FMUs, ready at t = 0, on FMI_RUNTIME. ``launch``: ToastFlight v_launch overrides.
+        The ovfmi host is kept and reset for each new toast (the launch speed is fixed per run)."""
+        if FMI_RUNTIME == "fmpy":
+            return CoSimulation(self.instances, self.initial, {"ToastFlight": launch} if launch else None)
+        from .toaster_ovfmi import OvfmiCoSimulation
+
+        if self._ovfmi is None:
+            self._ovfmi = OvfmiCoSimulation(self.toaster_usd, ROOT, self.initial, launch)
+        else:
+            self._ovfmi.reset()
+        return self._ovfmi
 
     @property
     def toaster_usd(self) -> Path:
@@ -388,8 +406,7 @@ class ToasterDevice:
         self._speed = 1.0
         self.send = send
         self.feedback = feedback
-        self.sim = CoSimulation(scenario.instances, scenario.initial,
-                                {"ToastFlight": flight_params(scenario, eject_height)} if eject_height > 0 else None)
+        self.sim = scenario.cosimulation(flight_params(scenario, eject_height) if eject_height > 0 else None)
         self._lock = threading.Lock()
         self._inputs: dict[str, float] = {}
         self._stop = threading.Event()
@@ -414,7 +431,7 @@ class ToasterDevice:
         self._thread.start()
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True, name="toaster-monitor")
         self._monitor_thread.start()
-        log.info("Toaster co-simulation running: %s", ", ".join(f.name for f, _ in self.sim.fmus))
+        log.info("Toaster co-simulation running on %s: %s", FMI_RUNTIME, ", ".join(f.name for f, _ in self.sim.fmus))
 
     def set_inputs(self, lever: float | None = None, dial: float | None = None, cancel: float | None = None) -> None:
         with self._lock:
@@ -476,12 +493,17 @@ class ToasterDevice:
                 now = time.perf_counter()
                 budget += (now - last) * self._speed
                 last = now
-                steps, limit = 0, max(25, int(25 * self._speed))
-                while budget >= STEP and steps < limit:
-                    self._step()
-                    budget -= STEP
+                dt = FAST_STEP if self._speed > 1.0 else STEP
+                steps, limit = 0, max(25, int(25 * self._speed * STEP / dt))
+                speed = self._speed
+                while budget >= dt and steps < limit:
+                    self._step(dt)
+                    budget -= dt
                     steps += 1
-                if budget >= STEP:  # fell behind (debugger, sleep): don't try to catch up
+                    if self._speed != speed:  # heating started or ended: the rest was owed at the old rate
+                        budget = 0.0
+                        break
+                if budget >= dt:  # fell behind (debugger, sleep): don't try to catch up
                     budget = 0.0
                 if steps:
                     self._publish()
@@ -489,7 +511,7 @@ class ToasterDevice:
         except Exception:
             log.exception("Toaster co-simulation stopped")
 
-    def _step(self) -> None:
+    def _step(self, dt: float = STEP) -> None:
         with self._lock:
             inputs = dict(self._inputs)
             press = self._press
@@ -511,7 +533,7 @@ class ToasterDevice:
         for role, (prim, attr) in JOINTS.items():
             if role in inputs:
                 usd.setdefault(prim, {})[attr] = inputs[role]
-        self.sim.step(STEP)
+        self.sim.step(dt)
         if int(round(self.sim.t / STEP)) % 10 == 0:  # monitor samples every 0.1 s
             v = self._snapshot(self.sim)
             with self._lock:
