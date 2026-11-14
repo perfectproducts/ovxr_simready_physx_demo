@@ -49,6 +49,10 @@ FOLLOW_YAW = np.radians(35.0)  # off to the user's left, clear of the catalog an
 # Close button in the panel's top-right corner (panel-local centre, half size) [m].
 CLOSE_CENTER = (PANEL_W / 2 - 0.035, PANEL_H / 2 - 0.035)
 CLOSE_HALF = 0.022
+# Page buttons (help): ◀ n/m ▶ in the bottom-right corner, below three detail lines; drawn with the
+# text only when a message has pages. Panel-local centres and half size [m]; the apps hit-test these.
+NAV_PREV, NAV_NEXT = (PANEL_W / 2 - 0.165, -PANEL_H / 2 + 0.024), (PANEL_W / 2 - 0.035, -PANEL_H / 2 + 0.024)
+NAV_HALF = 0.018
 
 _FONT_DIR = Path("C:/Windows/Fonts")
 
@@ -61,6 +65,7 @@ class Message:
     detail: str
     posted: float
     hold: float
+    nav: str = ""  # "2/3": the message has pages, the panel shows ◀ ▶ buttons
 
 
 class Feedback:
@@ -68,10 +73,10 @@ class Feedback:
         self._lock = threading.Lock()
         self._msg = Message(0, "info", "", "", 0.0, 0.0)
 
-    def post(self, kind: str, title: str, detail: str = "", hold: float | None = None) -> None:
+    def post(self, kind: str, title: str, detail: str = "", hold: float | None = None, nav: str = "") -> None:
         with self._lock:
             self._msg = Message(self._msg.version + 1, kind, title, detail, time.perf_counter(),
-                                HOLD_S.get(kind, 6.0) if hold is None else hold)
+                                HOLD_S.get(kind, 6.0) if hold is None else hold, nav)
         log.info("HUD [%s] %s%s", kind, title, f" | {detail}" if detail else "")
 
     def current(self) -> Message:
@@ -160,8 +165,35 @@ class TextLayout:
             lines[-1] = self._fit(lines[-1] + " …", font)
         return [self._fit(line, font) for line in lines]
 
-    def points(self, title: str, detail: str) -> np.ndarray:
-        """Panel-local quad corners, shape (MAX_QUADS * 4, 3), float32; panel plane is XY, +Z faces the viewer."""
+    def _text_quads(self, text: str, font, x_left: float, y_top: float) -> list[tuple]:
+        ascent, descent = font.getmetrics()
+        img = Image.new("L", (int(font.getlength(text)) + 4, ascent + descent + 4), 0)
+        ImageDraw.Draw(img).text((2, 2), text, font=font, fill=255)
+        return [(x_left + x0 * PX_M, y_top - y1 * PX_M, x_left + x1 * PX_M, y_top - y0 * PX_M)
+                for x0, y0, x1, y1 in _mask_rects(np.asarray(img) >= 128)]
+
+    def _nav_quads(self, label: str) -> list[tuple]:
+        """◀ label ▶: two framed buttons with a stepped triangle each, the page label between them."""
+        quads, h, bar = [], NAV_HALF, 0.0018
+        for (cx, cy), sign in ((NAV_PREV, -1), (NAV_NEXT, 1)):
+            quads += [(cx - h, cy + h - bar, cx + h, cy + h), (cx - h, cy - h, cx + h, cy - h + bar),
+                      (cx - h, cy - h, cx - h + bar, cy + h), (cx + h - bar, cy - h, cx + h, cy + h)]
+            steps, tw, th = 8, 0.011, 0.012  # triangle: half width along x, half height
+            for k in range(steps):  # columns from the flat side to the tip
+                x0 = -tw + 2 * tw * k / steps
+                half = th * (1 - k / steps)
+                xa, xb = cx + sign * x0, cx + sign * (x0 + 2 * tw / steps)
+                quads.append((min(xa, xb), cy - half, max(xa, xb), cy + half))
+        ascent, descent = self.body_font.getmetrics()
+        mid = (NAV_PREV[0] + NAV_NEXT[0]) / 2
+        width = self.body_font.getlength(label) * PX_M
+        quads += self._text_quads(label, self.body_font, mid - width / 2 - 2 * PX_M,
+                                  NAV_PREV[1] + (ascent + descent) * PX_M / 2 + 2 * PX_M)
+        return quads
+
+    def points(self, title: str, detail: str, nav: str = "") -> np.ndarray:
+        """Panel-local quad corners, shape (MAX_QUADS * 4, 3), float32; panel plane is XY, +Z faces the viewer.
+        ``nav`` ("2/3"): draw the page buttons with that label."""
         rows = [(self._fit(title, self.title_font), self.title_font, TITLE_PX)]
         rows += [(line, self.body_font, BODY_PX) for line in self._wrap(detail, self.body_font, DETAIL_LINES)]
 
@@ -170,12 +202,10 @@ class TextLayout:
         for text, font, size in rows:
             ascent, descent = font.getmetrics()
             if text:
-                img = Image.new("L", (int(font.getlength(text)) + 4, ascent + descent + 4), 0)
-                ImageDraw.Draw(img).text((2, 2), text, font=font, fill=255)
-                for x0, y0, x1, y1 in _mask_rects(np.asarray(img) >= 128):
-                    quads.append((x_left + x0 * PX_M, y_cursor - y1 * PX_M,
-                                  x_left + x1 * PX_M, y_cursor - y0 * PX_M))
+                quads += self._text_quads(text, font, x_left, y_cursor)
             y_cursor -= (ascent + descent) * PX_M * 1.05
+        if nav:
+            quads += self._nav_quads(nav)
 
         if len(quads) > MAX_QUADS:
             log.debug("HUD text needs %d quads, truncated to %d", len(quads), MAX_QUADS)

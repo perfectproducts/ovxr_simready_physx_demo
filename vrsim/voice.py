@@ -58,6 +58,16 @@ _BROWSER_PAGE_RE = re.compile(r"^(?:go\s+)?(?:to\s+)?(?:the\s+)?(next|previous|p
 _REALIGN_RE = re.compile(r"\b(re ?align|re ?cent(er|re)|re ?set (the |my )?(view|room|position|scene))\b"
                          r"|\balign (the |my )?(room|scene|view)\b|\bcent(er|re) (the )?(room|scene|view|me)\b")
 _NEW_TOAST_RE = re.compile(r"\b(new|fresh|another|next)\s+(toast|slice|bread)\b|\breset\b.*\btoaster\b")
+# "toggle toaster", "turn the toaster on", "stop toasting": the lever (start) or cancel button (stop)
+_TOASTER_RE = re.compile(r"\btoggle\b.*\btoast|\b(?:turn|switch|start|stop)\b.*\btoast(?:er|ing)?\b|^toast(?: it)?$")
+_ON_RE, _OFF_RE = re.compile(r"\b(?:on|start)\b"), re.compile(r"\b(?:off|stop)\b")
+# "show the toaster", "hide the toaster", "toggle toaster visibility": the toaster on the desk (hidden at start)
+_TOASTER_SHOW_RE = re.compile(r"\b(?:show|display|unhide|hide|remove|bring (?:back|out)|put away|get rid of)\b.*\btoaster\b"
+                              r"|\btoggle\b.*\btoaster\b.*\bvisib")
+_HELP_RE = re.compile(r"^(?:please\s+)?(?:help|help me|what can i say|what can you do|(?:list|show)(?: me)?(?: all| the)?"
+                      r" (?:voice )?commands|commands|voice commands)$")
+# "toggle signal monitor", "show the monitor", "hide the signals": the toaster's FMU monitor panel
+_MONITOR_RE = re.compile(r"\b(?:toggle|show|hide|open|close|turn|switch)\b.*\b(?:monitor|signals?|graphs?|plots?)\b")
 _CLEAR_RE = re.compile(r"\b(clear|remove|delete|reset)\b.*\b(all|everything|scene|table)\b|^(clear|reset)$")
 _CANCEL_RE = re.compile(r"^(?:cancel|stop|abort)\b|\b(?:cancel|stop|abort)\b.*\b(?:download|downloading|loading)\b")
 _UNFIX_RE = re.compile(r"\b(unfix|unlock|unpin|unfreeze|release|free)\b")
@@ -67,7 +77,7 @@ _UNDO_RE = re.compile(r"\b(undo|remove (?:the )?last|delete (?:the )?last|take (
 
 @dataclass
 class Command:
-    kind: str  # spawn | clear | undo | fix | unfix | new_toast | realign | query ("" = everything) | browser_close | browser_page (count = +-1) | cancel (downloads)
+    kind: str  # spawn | clear | undo | fix | unfix | new_toast | toaster / toaster_visible / monitor (query "on" | "off" | "" = toggle) | help | realign | query ("" = everything) | browser_close | browser_page (count = +-1) | cancel (downloads)
     query: str = ""
     count: int = 1
     text: str = ""
@@ -83,6 +93,17 @@ def _singular(noun: str) -> str:
     return noun
 
 
+def _switch(text: str, on: str = "", off: str = "") -> str:
+    """'on' / 'off' when the words say which, '' (toggle) otherwise."""
+    if re.search(r"\btoggle\b", text):
+        return ""
+    if _ON_RE.search(text) or (on and re.search(on, text)):
+        return "on"
+    if _OFF_RE.search(text) or (off and re.search(off, text)):
+        return "off"
+    return ""
+
+
 def parse_command(text: str, intents: list | None = None, entities: dict | None = None) -> Command | None:
     text = re.sub(r"[^\w\s']", " ", (text or "").lower()).strip()
     text = re.sub(r"\s+", " ", text)
@@ -91,6 +112,17 @@ def parse_command(text: str, intents: list | None = None, entities: dict | None 
         return Command("realign", text=text)
     if _NEW_TOAST_RE.search(text):  # "new toast", "fresh toast", "reset the toaster"
         return Command("new_toast", text=text)
+    if _MONITOR_RE.search(text):  # before the toaster: "turn on the toaster monitor"
+        return Command("monitor", _switch(text, r"\b(?:show|open)\b", r"\b(?:hide|close)\b"), text=text)
+    if _TOASTER_SHOW_RE.search(text):  # before the toaster on / off: "toggle toaster visibility"
+        on = re.search(r"\b(?:show|display|unhide|bring)\b", text)
+        off = re.search(r"\b(?:hide|remove|put away|get rid of)\b", text)
+        return Command("toaster_visible", "" if re.search(r"\btoggle\b", text) else "on" if on else "off" if off else "",
+                       text=text)
+    if _HELP_RE.match(text):
+        return Command("help", text=text)
+    if _TOASTER_RE.search(text):
+        return Command("toaster", _switch(text), text=text)
     if _UNFIX_RE.search(text):  # "free it", "unlock the box": before Wit's intents, which don't know these
         return Command("unfix", text=text)
     if _FIX_RE.search(text):  # "fix it", "lock it in place"
@@ -310,7 +342,7 @@ class VoiceListener:
         if command:
             self.commands.put(command)  # the app posts what it does with it
         elif text:
-            self._post("error", f"“{text}”", "Not a command. Try: add a mug · spawn three footballs · undo")
+            self._post("error", f"“{text}”", "Not a command. Say “help” for the list")
         else:
             self._post("error", "Didn't catch that", "Speak a little closer to the headset and try again")
 
@@ -333,6 +365,6 @@ def start_console(commands: "queue.Queue[Command]") -> None:
             if command:
                 commands.put(command)
             elif line.strip():
-                print("  try: 'add a mug', 'spawn three footballs', 'undo', 'clear all'")
+                print("  try: 'add a mug', 'show the toaster', 'undo', 'clear all' or 'help'")
 
     threading.Thread(target=run, daemon=True, name="console").start()

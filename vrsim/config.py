@@ -219,6 +219,8 @@ class Config:
     wit_token: str = field(default_factory=_wit_token)
     wit_api_version: str = "20240304"
     mic_device: str | int | None = field(default_factory=lambda: os.environ.get("VRSIM_MIC") or None)
+    # Output for 3D sounds (the toaster's ding); None = the system default, the headset over Link
+    speaker_device: str | int | None = field(default_factory=lambda: os.environ.get("VRSIM_SPEAKER") or None)
     sample_rate: int = 16000
     max_utterance_s: float = 8.0
 
