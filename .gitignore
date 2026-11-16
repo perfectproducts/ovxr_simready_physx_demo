@@ -10,3 +10,4 @@ huggingface_api.txt
 *.blend1
 .vs/
 .vscode/
+*.mp4
