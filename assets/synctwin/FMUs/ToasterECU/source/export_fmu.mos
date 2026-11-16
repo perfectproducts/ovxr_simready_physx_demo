@@ -1,0 +1,20 @@
+// Build the toaster FMUs with OpenModelica (1.26: FMI 2.0 export; FMI 3.0 is not available in buildModelFMU).
+// Run from this folder:  omc export_fmu.mos
+// Output: ../toaster_ctrl.fmu, ../../ToasterThermal/toaster_thermal.fmu,
+//         ../../ToastFlight/toast_flight.fmu   (FMI 2.0 co-simulation)
+
+loadFile("ToasterECU.mo"); getErrorString();
+
+// FMI 2.0 co-simulation FMUs, built in ./build (git-ignored) and copied next to their release.json
+mkdir("build"); cd("build");
+buildModelFMU(ToasterECU.ToasterController, version = "2.0", fmuType = "cs",
+              fileNamePrefix = "toaster_ctrl"); getErrorString();
+buildModelFMU(ToasterECU.ToasterThermal, version = "2.0", fmuType = "cs",
+              fileNamePrefix = "toaster_thermal"); getErrorString();
+buildModelFMU(ToasterECU.ToastFlight, version = "2.0", fmuType = "cs",
+              fileNamePrefix = "toast_flight"); getErrorString();
+cd("..");
+copy("build/toaster_ctrl.fmu", "../toaster_ctrl.fmu");
+copy("build/toaster_thermal.fmu", "../../ToasterThermal/toaster_thermal.fmu");
+copy("build/toast_flight.fmu", "../../ToastFlight/toast_flight.fmu");
+getErrorString();
